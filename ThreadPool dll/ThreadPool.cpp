@@ -1,9 +1,9 @@
 #include "ThreadPool.h"
+
+#include <optional>
 #include <stdexcept>
 
-// 声明一个 thread_local 变量来保存当前线程在队列中的索引
-// 初始化为 -1 表示不是线程池中的线程
-thread_local int tls_queue_index = -1;
+thread_local std::optional<std::size_t> tls_queue_index;
 
 void ThreadPool::EnqueueReal(std::function<void()> task)
 {
@@ -12,34 +12,32 @@ void ThreadPool::EnqueueReal(std::function<void()> task)
         throw std::runtime_error("Submit on stopped ThreadPool");
     }
 
-    int i = tls_queue_index;
-    if (i == -1)
-    {
-        i = submit_index.fetch_add(1, std::memory_order_relaxed) % queues.size();
-    }
+    const std::size_t queue_index = tls_queue_index.has_value()
+                                        ? *tls_queue_index
+                                        : submit_index.fetch_add(1, std::memory_order_relaxed) % queues.size();
 
     {
-        std::unique_lock<std::mutex> lock(queues[i]->mtx);
-        queues[i]->tasks.emplace_back(std::move(task));
+        std::unique_lock<std::mutex> lock(queues[queue_index].mtx);
+        queues[queue_index].tasks.emplace_back(std::move(task));
     }
 
-    queues[i]->count.fetch_add(1, std::memory_order_release);
+    queues[queue_index].count.fetch_add(1, std::memory_order_release);
     sleep_cv.notify_one();
 }
 
-ThreadPool::ThreadPool(size_t numThreads) : terminate(false), submit_index(0)
+ThreadPool::ThreadPool(std::size_t numThreads) : terminate(false), submit_index(0)
 {
     if (numThreads == 0)
         numThreads = 1;
 
-    for (size_t i = 0; i < numThreads; ++i)
+    for (std::size_t i = 0; i < numThreads; ++i)
     {
-        queues.emplace_back(std::make_unique<WorkQueue>());
+        queues.emplace_back();
     }
 
-    for (size_t i = 0; i < numThreads; ++i)
+    for (std::size_t i = 0; i < numThreads; ++i)
     {
-        workers.emplace_back(&ThreadPool::WorkerRoutine, this, i);
+        workers.emplace_back([this, i] { WorkerRoutine(i); });
     }
 }
 
@@ -56,40 +54,40 @@ ThreadPool::~ThreadPool()
     }
 }
 
-void ThreadPool::WorkerRoutine(size_t index)
+void ThreadPool::WorkerRoutine(std::size_t index)
 {
-    tls_queue_index = static_cast<int>(index);
-    const size_t numQueues = queues.size();
+    tls_queue_index = index;
+    const std::size_t numQueues = queues.size();
 
     while (true)
     {
         std::function<void()> task;
-        int popped_queue_index = -1;
+        std::optional<std::size_t> popped_queue_index;
 
         // 1. 尝试从本地队列 (LIFO 模式有助于缓存热度) 弹出
         {
-            std::unique_lock<std::mutex> lock(queues[index]->mtx);
-            if (!queues[index]->tasks.empty())
+            std::unique_lock<std::mutex> lock(queues[index].mtx);
+            if (!queues[index].tasks.empty())
             {
-                task = std::move(queues[index]->tasks.back());
-                queues[index]->tasks.pop_back();
-                popped_queue_index = static_cast<int>(index);
+                task = std::move(queues[index].tasks.back());
+                queues[index].tasks.pop_back();
+                popped_queue_index = index;
             }
         }
 
         // 2. 本地队列为空，尝试进行 Work-Stealing
         if (!task)
         {
-            for (size_t i = 1; i < numQueues; ++i)
+            for (std::size_t i = 1; i < numQueues; ++i)
             {
-                size_t steal_index = (index + i) % numQueues;
-                std::unique_lock<std::mutex> lock(queues[steal_index]->mtx, std::try_to_lock);
-                if (lock.owns_lock() && !queues[steal_index]->tasks.empty())
+                const std::size_t steal_index = (index + i) % numQueues;
+                std::unique_lock<std::mutex> lock(queues[steal_index].mtx, std::try_to_lock);
+                if (lock.owns_lock() && !queues[steal_index].tasks.empty())
                 {
                     // 从别人队列的前端偷取 (FIFO，偷取那些久未执行的数据)
-                    task = std::move(queues[steal_index]->tasks.front());
-                    queues[steal_index]->tasks.pop_front();
-                    popped_queue_index = static_cast<int>(steal_index);
+                    task = std::move(queues[steal_index].tasks.front());
+                    queues[steal_index].tasks.pop_front();
+                    popped_queue_index = steal_index;
                     break;
                 }
             }
@@ -98,15 +96,15 @@ void ThreadPool::WorkerRoutine(size_t index)
         // 3. 执行任务与休眠机制
         if (task)
         {
-            queues[popped_queue_index]->count.fetch_sub(1, std::memory_order_release);
+            queues[*popped_queue_index].count.fetch_sub(1, std::memory_order_release);
             task();
         }
         else
         {
             auto has_tasks = [&]() {
-                for (size_t i = 0; i < numQueues; ++i)
+                for (std::size_t i = 0; i < numQueues; ++i)
                 {
-                    if (queues[i]->count.load(std::memory_order_acquire) > 0)
+                    if (queues[i].count.load(std::memory_order_acquire) > 0)
                         return true;
                 }
                 return false;

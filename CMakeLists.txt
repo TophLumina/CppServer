@@ -21,16 +21,35 @@ FetchContent_MakeAvailable(nlohmann_json)
 
 add_subdirectory("ThreadPool dll")
 
-add_executable(server main.cpp)
+add_executable(server main.cpp Core.h Utils.h Services.h Core.cpp)
 target_link_libraries(server PRIVATE 
   httplib::httplib 
   ThreadPool::ThreadPool
   nlohmann_json::nlohmann_json
 )
 
+# On Windows, copy the ThreadPool DLL to the output directory of the server executable so that it can find the DLL at runtime.
+if(WIN32)
+  add_custom_command(TARGET server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      $<TARGET_FILE:ThreadPool>
+      $<TARGET_FILE_DIR:server>
+  )
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
   add_executable(threadpool_smoke_test tests/threadpool_smoke.cpp)
   target_link_libraries(threadpool_smoke_test PRIVATE ThreadPool::ThreadPool)
+
+  # On Windows, copy the ThreadPool DLL to the output directory of the test executable so that it can find the DLL at runtime.
+  if(WIN32)
+    add_custom_command(TARGET threadpool_smoke_test POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:ThreadPool>
+        $<TARGET_FILE_DIR:threadpool_smoke_test>
+    )
+  endif()
+
   add_test(NAME threadpool_smoke COMMAND threadpool_smoke_test)
 endif()
