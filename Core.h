@@ -20,6 +20,7 @@ private:
   std::vector<std::thread> listener_threads;
   Utils::AppContext context;
 
+  // 兼容 httplib 的 TaskQueue 接口，使用线程池来处理任务
   template <typename TPool> class SharedTaskQueue : public httplib::TaskQueue {
   public:
     explicit SharedTaskQueue(TPool &pool)
