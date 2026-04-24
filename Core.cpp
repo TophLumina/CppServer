@@ -1,5 +1,4 @@
 #include "Core.h"
-
 #include "Services.h"
 
 namespace CppServer::Core {
