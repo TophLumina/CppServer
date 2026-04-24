@@ -13,8 +13,8 @@ void RegisterRoutes(httplib::Server &server, TContext &context) {
 
   server.Get("/", [&](const httplib::Request &, httplib::Response &res) {
     request_count.fetch_add(1, std::memory_order_relaxed);
-    res.set_content("C++ status server is running. Try /status\n",
-                    "text/plain; charset=utf-8");
+    Json body = {{"ok", true}, {"message", "server is running. Try /status"}};
+    res.set_content(body.dump(), "application/json; charset=utf-8");
   });
 
   server.Get("/status", [&](const httplib::Request &, httplib::Response &res) {
