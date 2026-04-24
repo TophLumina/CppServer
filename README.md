@@ -8,8 +8,6 @@ The current version tries to listen on the following ports:
 
 - `8080`
 - `8081`
-- `8082`
-- `8083`
 
 If a preferred port is unavailable, the server automatically falls back to any available port.
 如果某个首选端口不可用，服务会自动回退并绑定到可用端口。
@@ -22,15 +20,13 @@ docker build -t cpp-server .
 
 ## 2) Run container / 运行容器
 
-Map all 4 ports to the host to make every listener reachable.
-建议将 4 个端口都映射到主机，确保所有监听器都可访问。
+Map all 2 ports to the host to make every listener reachable.
+建议将 2 个端口都映射到主机，确保所有监听器都可访问。
 
 ```powershell
 docker run -d --name cpp-server `
 	-p 8080:8080 `
 	-p 8081:8081 `
-	-p 8082:8082 `
-	-p 8083:8083 `
 	cpp-server
 ```
 
@@ -65,7 +61,7 @@ curl http://127.0.0.1:8080/request-status
 
 - The server listens on `0.0.0.0` inside the container.
 - 服务在容器内监听 `0.0.0.0`。
-- In production, open only required ports (for example, `8080-8083`).
-- 生产环境请只开放需要的端口（例如 `8080-8083`）。
+- In production, open only required ports (for example, `8080-8081`).
+- 生产环境请只开放需要的端口（例如 `8080-8081`）。
 - On cloud VMs, allow matching inbound rules in security groups/firewalls.
 - 云服务器部署时，需在安全组或防火墙中放行对应入站端口。
