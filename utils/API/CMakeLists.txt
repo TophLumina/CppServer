@@ -8,6 +8,19 @@ add_library(CppServerAPI INTERFACE)
 set_target_properties(CppServerAPI PROPERTIES EXPORT_NAME API)
 add_library(httplib::API ALIAS CppServerAPI)
 
+# Generate a dedicated compile command for API.h so clangd can index it
+# without introducing an extra translation unit source file.
+set(CPPSERVER_API_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/API.h")
+set_source_files_properties(${CPPSERVER_API_HEADER} PROPERTIES
+  LANGUAGE CXX
+  HEADER_FILE_ONLY OFF
+)
+
+add_library(CppServerAPIIndex OBJECT EXCLUDE_FROM_ALL
+  ${CPPSERVER_API_HEADER}
+)
+target_link_libraries(CppServerAPIIndex PRIVATE CppServerAPI)
+
 target_include_directories(CppServerAPI INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/CppServer/API>
