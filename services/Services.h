@@ -1,8 +1,8 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <typeindex>
 #include <unordered_map>
@@ -23,7 +23,7 @@ public:
         api_registry_(std::move(api_registry)) {}
 
   template <typename TRouter, typename... TArgs>
-  TRouter &AddRouter(TArgs &&...args) {
+  TRouter &RegisterRouter(TArgs &&...args) {
     static_assert(std::is_base_of_v<RouterModule<TContext>, TRouter>,
                   "TRouter must derive from RouterModule<TContext>");
 
@@ -34,9 +34,21 @@ public:
     }
 
     auto instance = std::make_unique<TRouter>(std::forward<TArgs>(args)...);
+    auto *router_module = instance.get();
     const std::size_t index = router_vector_.size();
     router_index_map_.emplace(router_type, index);
     router_vector_.push_back(std::move(instance));
+
+    auto cache_policy_resolver = [router_module](const std::string &method,
+                                                 const std::string &path) {
+      return router_module->ResolveCachePolicy(method, path);
+    };
+
+    httplib::API::Router<TContext> router(server_, context_, api_registry_,
+                                          router_module->RouterName(),
+                                          std::move(cache_policy_resolver));
+    router_module->Register(router);
+
     return static_cast<TRouter &>(*router_vector_.back());
   }
 
@@ -47,21 +59,6 @@ public:
     }
 
     return static_cast<TRouter *>(router_vector_[found->second].get());
-  }
-
-  void RegisterAllRoutes() {
-    for (const auto &router_module : router_vector_) {
-      auto cache_policy_resolver =
-          [router_module_ptr = router_module.get()](const std::string &method,
-                                                    const std::string &path) {
-            return router_module_ptr->ResolveCachePolicy(method, path);
-          };
-
-      httplib::API::Router<TContext> router(server_, context_, api_registry_,
-                                            router_module->RouterName(),
-                                            std::move(cache_policy_resolver));
-      router_module->Register(router);
-    }
   }
 
   std::shared_ptr<httplib::API::Registry> ApiRegistry() const {

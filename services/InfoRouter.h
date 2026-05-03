@@ -32,7 +32,7 @@
 
 namespace CppServer::Routers {
 template <typename TContext>
-class InfoRouter final : public CppServer::RouterModule<TContext> {
+class InfoRouter final : public CppServer::Services::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "INFO"; }
 

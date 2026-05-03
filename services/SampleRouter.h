@@ -6,7 +6,7 @@
 
 namespace CppServer::Routers {
 template <typename TContext>
-class SampleRouter final : public CppServer::RouterModule<TContext> {
+class SampleRouter final : public CppServer::Services::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "SAMPLE"; }
 

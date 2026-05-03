@@ -27,6 +27,8 @@
 #endif
 #endif
 
+namespace ThreadPool {
+
 class THREADPOOL_API ThreadPool {
 public:
   ThreadPool(std::size_t numThreads = std::thread::hardware_concurrency());
@@ -78,3 +80,5 @@ public:
   ThreadPool(ThreadPool &&) = delete;
   ThreadPool &operator=(ThreadPool &&) = delete;
 };
+
+} // namespace ThreadPool

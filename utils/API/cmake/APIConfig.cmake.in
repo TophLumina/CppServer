@@ -1,0 +1,24 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(httplib)
+find_dependency(nlohmann_json)
+
+include("${CMAKE_CURRENT_LIST_DIR}/APITargets.cmake")
+
+if(TARGET API::API)
+  set_property(TARGET API::API APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES
+      httplib::httplib
+      nlohmann_json::nlohmann_json
+  )
+endif()
+
+if(TARGET API::API AND NOT TARGET httplib::API)
+  add_library(httplib::API INTERFACE IMPORTED)
+  set_property(TARGET httplib::API APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES API::API
+  )
+endif()
+
+check_required_components(API)

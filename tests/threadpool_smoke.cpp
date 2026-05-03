@@ -7,7 +7,7 @@
 #include "ThreadPool.h"
 
 int main() {
-    ThreadPool pool(4);
+    ::ThreadPool::ThreadPool pool(4);
 
     constexpr int task_count = 100;
     std::atomic<int> counter{0};

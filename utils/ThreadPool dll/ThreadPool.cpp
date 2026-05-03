@@ -3,6 +3,8 @@
 #include <optional>
 #include <stdexcept>
 
+namespace ThreadPool {
+
 thread_local std::optional<std::size_t> tls_queue_index;
 
 void ThreadPool::EnqueueReal(std::function<void()> task) {
@@ -108,3 +110,5 @@ void ThreadPool::WorkerRoutine(std::size_t index) {
     }
   }
 }
+
+} // namespace ThreadPool

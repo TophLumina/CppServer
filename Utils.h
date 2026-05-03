@@ -26,6 +26,6 @@ struct AppContext {
   ServerOptions options;
   Clock::time_point start_time;
   std::atomic<unsigned long long> request_count;
-  ThreadPool worker_pool;
+  ::ThreadPool::ThreadPool worker_pool;
 };
 } // namespace CppServer::Utils

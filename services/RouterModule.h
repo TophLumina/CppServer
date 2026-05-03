@@ -7,7 +7,7 @@
 
 #include "API.h"
 
-namespace CppServer {
+namespace CppServer::Services {
 template <typename TContext> class RouterModule {
 public:
   virtual ~RouterModule() = default;
@@ -21,4 +21,4 @@ public:
     return std::nullopt;
   }
 };
-} // namespace CppServer
+} // namespace CppServer::Services

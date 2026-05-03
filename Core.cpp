@@ -16,14 +16,16 @@ void Server::Start() {
     auto server = std::make_shared<httplib::Server>();
     server->new_task_queue = [&worker_pool = context.worker_pool] {
       auto task_queue =
-          std::make_unique<SharedTaskQueue<ThreadPool>>(worker_pool);
+          std::make_unique<SharedTaskQueue<::ThreadPool::ThreadPool>>(
+              worker_pool);
       return task_queue.release();
     };
 
     CppServer::Services::Services<Utils::AppContext> services(*server, context);
-    services.AddRouter<CppServer::Routers::InfoRouter<Utils::AppContext>>();
-    services.AddRouter<CppServer::Routers::SampleRouter<Utils::AppContext>>();
-    services.RegisterAllRoutes();
+    services
+        .RegisterRouter<CppServer::Routers::InfoRouter<Utils::AppContext>>();
+    services
+        .RegisterRouter<CppServer::Routers::SampleRouter<Utils::AppContext>>();
 
     if (!server->bind_to_port(context.options.host, preferred_port)) {
       std::cerr << "Failed to bind listener on " << context.options.host << ":"

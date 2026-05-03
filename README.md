@@ -74,8 +74,8 @@ Current policies in this project / 当前项目策略：
 Use `SampleRouter` as the reference implementation.
 可参考 `SampleRouter` 作为实现模板。
 
-1. Create a new router class in `services/` that derives from `RouterModule<TContext>`.
-2. 在 `services/` 下新增一个继承 `RouterModule<TContext>` 的路由类。
+1. Create a new router class in `services/` that derives from `CppServer::Services::RouterModule<TContext>`.
+2. 在 `services/` 下新增一个继承 `CppServer::Services::RouterModule<TContext>` 的路由类。
 3. Implement `RouterName()` and `Register(...)` in that class.
 4. 在该类中实现 `RouterName()` 与 `Register(...)`。
 5. (Optional) implement `ResolveCachePolicy(method, path)` to configure endpoint-level caching.
@@ -86,14 +86,14 @@ Use `SampleRouter` as the reference implementation.
 10. 在启动装配代码中添加一行：
 
 ```cpp
-services.AddRouter<CppServer::Routers::YourRouter<Utils::AppContext>>();
+services.RegisterRouter<CppServer::Routers::YourRouter<Utils::AppContext>>();
 ```
 
 Reference:
 参考：
 
 - `services/SampleRouter.h` (`SampleRouter`)
-- `Core.cpp` (router wiring with `services.AddRouter<...>()`)
+- `Core.cpp` (router wiring with `services.RegisterRouter<...>()`)
 
 ## Expose to external network / 对外网络暴露
 
