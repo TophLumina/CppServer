@@ -30,13 +30,6 @@ docker run -d --name cpp-server `
 	cpp-server
 ```
 
-Use container logs to confirm the actual bound ports.
-可通过容器日志确认实际绑定端口。
-
-```powershell
-docker logs cpp-server
-```
-
 ## 3) Test endpoints / 测试接口
 
 You can use any bound port (example below uses `8080`).
@@ -82,15 +75,15 @@ Use `SampleRouter` as the reference implementation.
 可参考 `SampleRouter` 作为实现模板。
 
 1. Create a new router class in `services/` that derives from `RouterModule<TContext>`.
-1. 在 `services/` 下新增一个继承 `RouterModule<TContext>` 的路由类。
-2. Implement `RouterName()` and `Register(...)` in that class.
-2. 在该类中实现 `RouterName()` 与 `Register(...)`。
-3. (Optional) implement `ResolveCachePolicy(method, path)` to configure endpoint-level caching.
-3. （可选）实现 `ResolveCachePolicy(method, path)` 以配置端点级缓存策略。
-4. Include the router header in `Core.cpp`.
-4. 在 `Core.cpp` 中包含该路由头文件。
-5. Add one line in startup wiring:
-5. 在启动装配代码中添加一行：
+2. 在 `services/` 下新增一个继承 `RouterModule<TContext>` 的路由类。
+3. Implement `RouterName()` and `Register(...)` in that class.
+4. 在该类中实现 `RouterName()` 与 `Register(...)`。
+5. (Optional) implement `ResolveCachePolicy(method, path)` to configure endpoint-level caching.
+6. （可选）实现 `ResolveCachePolicy(method, path)` 以配置端点级缓存策略。
+7. Include the router header in `Core.cpp`.
+8. 在 `Core.cpp` 中包含该路由头文件。
+9. Add one line in startup wiring:
+10. 在启动装配代码中添加一行：
 
 ```cpp
 services.AddRouter<CppServer::Routers::YourRouter<Utils::AppContext>>();
