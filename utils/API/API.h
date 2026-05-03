@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -32,6 +33,16 @@ inline constexpr std::size_t METADATA_UPDATE_RESPONSE_INTERVAL = 1024;
 /// 元信息最小更新时间间隔。
 inline constexpr auto METADATA_UPDATE_MIN_INTERVAL =
   std::chrono::milliseconds(2000);
+
+/// 路由响应缓存策略：按端点声明，空策略（std::nullopt）表示不缓存。
+struct CachePolicy {
+  std::chrono::milliseconds ttl = std::chrono::milliseconds(0);
+  std::vector<std::string> query_fields;
+  std::vector<std::string> header_fields;
+  std::size_t max_entries = 256;
+  std::size_t max_payload_bytes = 1024 * 1024;
+  bool cache_error_response = false;
+};
 
 template <typename TContext> class Router;
 
@@ -487,12 +498,18 @@ private:
 /// Router：封装 httplib 注册流程并自动采集返回类型与文档元数据。
 template <typename TContext> class Router {
 public:
+  using CachePolicyResolver =
+      std::function<std::optional<CachePolicy>(const std::string &,
+                                               const std::string &)>;
+
   /// 可通过 router_name 控制该 Router 注册出的 OpenAPI tag 名称。
   Router(httplib::Server &server, TContext &context,
          std::shared_ptr<Registry> registry = std::make_shared<Registry>(),
-         std::string router_name = DEFAULT_ROUTER_NAME)
+         std::string router_name = DEFAULT_ROUTER_NAME,
+         CachePolicyResolver cache_policy_resolver = CachePolicyResolver{})
       : server_(server), context_(context), registry_(std::move(registry)),
-        router_name_(NormalizeRouterName(std::move(router_name))) {}
+        router_name_(NormalizeRouterName(std::move(router_name))),
+        cache_policy_resolver_(std::move(cache_policy_resolver)) {}
 
   template <typename THandler>
   void Route(std::string method, const std::string &path, std::string summary,
@@ -500,6 +517,11 @@ public:
              THandler &&handler, int status = 200,
              std::string content_type = "application/json; charset=utf-8") {
     std::string normalized_method = NormalizeMethod(std::move(method));
+    std::optional<CachePolicy> cache_policy = std::nullopt;
+    if (cache_policy_resolver_) {
+      cache_policy = cache_policy_resolver_(normalized_method, path);
+    }
+
     RegisterRoute(
         normalized_method, path, std::move(summary), std::move(description),
         std::move(response_description), std::forward<THandler>(handler),
@@ -509,7 +531,7 @@ public:
               method_name, route_path,
               std::forward<decltype(native_handler)>(native_handler));
         },
-        status, std::move(content_type));
+          status, std::move(content_type), std::move(cache_policy));
   }
 
   template <typename THandler>
@@ -676,13 +698,8 @@ public:
 private:
   template <typename> static constexpr bool kAlwaysFalseHandler = false;
 
-  inline static constexpr std::size_t kPreviewBytes = 256;
-  inline static constexpr std::size_t kDirectOutputThresholdBytes = 1024;
-
-  static bool ShouldUseDirectOutput(const std::string &content_type,
-                                    const std::size_t payload_bytes) {
-    return !IsJsonMimeType(content_type) ||
-           payload_bytes >= kDirectOutputThresholdBytes;
+  static bool ShouldUseDirectOutput(const std::string &content_type) {
+    return !IsJsonMimeType(content_type);
   }
 
   struct MetadataUpdateState {
@@ -727,6 +744,142 @@ private:
     state.pending_responses = 0;
     state.last_update_time = now;
     return true;
+  }
+
+  struct CachedResponse {
+    int status = 200;
+    std::string content_type;
+    std::string body;
+  };
+
+  struct RouteCacheEntry {
+    CachedResponse response;
+    std::chrono::steady_clock::time_point expires_at{};
+    std::chrono::steady_clock::time_point last_access{};
+  };
+
+  struct RouteCacheStore {
+    std::mutex mutex;
+    std::unordered_map<std::string, RouteCacheEntry> entries;
+  };
+
+  static CachePolicy NormalizeCachePolicy(CachePolicy policy) {
+    auto compact_fields = [](std::vector<std::string> &fields) {
+      fields.erase(std::remove_if(fields.begin(), fields.end(),
+                                  [](const std::string &item) {
+                                    return item.empty();
+                                  }),
+                   fields.end());
+    };
+
+    compact_fields(policy.query_fields);
+    compact_fields(policy.header_fields);
+
+    if (policy.max_entries == 0) {
+      policy.max_entries = 1;
+    }
+    return policy;
+  }
+
+  static bool IsCacheEnabled(const std::optional<CachePolicy> &cache_policy) {
+    return cache_policy.has_value() && cache_policy->ttl.count() > 0;
+  }
+
+  static std::string BuildCacheKey(const httplib::Request &req,
+                                   const CachePolicy &cache_policy) {
+    if (cache_policy.query_fields.empty() &&
+        cache_policy.header_fields.empty()) {
+      return "_";
+    }
+
+    std::string key;
+    key.reserve(128);
+
+    const auto append_item = [&key](const char prefix, std::string_view field,
+                                    std::string_view value) {
+      key.push_back(prefix);
+      key.append(field.data(), field.size());
+      key.push_back('=');
+      key.append(std::to_string(value.size()));
+      key.push_back(':');
+      key.append(value.data(), value.size());
+      key.push_back('|');
+    };
+
+    for (const auto &field : cache_policy.query_fields) {
+      std::string value;
+      if (req.has_param(field.c_str())) {
+        value = req.get_param_value(field.c_str());
+      }
+      append_item('q', field, value);
+    }
+
+    for (const auto &field : cache_policy.header_fields) {
+      append_item('h', field, req.get_header_value(field.c_str()));
+    }
+
+    return key;
+  }
+
+  static std::optional<CachedResponse>
+  TryReadCachedResponse(RouteCacheStore &cache_store, const std::string &key) {
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(cache_store.mutex);
+
+    const auto it = cache_store.entries.find(key);
+    if (it == cache_store.entries.end()) {
+      return std::nullopt;
+    }
+
+    if (it->second.expires_at <= now) {
+      cache_store.entries.erase(it);
+      return std::nullopt;
+    }
+
+    it->second.last_access = now;
+    return it->second.response;
+  }
+
+  static void TryStoreCachedResponse(RouteCacheStore &cache_store,
+                                     const CachePolicy &cache_policy,
+                                     const std::string &key,
+                                     const CachedResponse &response) {
+    if (cache_policy.max_payload_bytes > 0 &&
+        response.body.size() > cache_policy.max_payload_bytes) {
+      return;
+    }
+    if (!cache_policy.cache_error_response && response.status >= 500) {
+      return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(cache_store.mutex);
+
+    for (auto it = cache_store.entries.begin(); it != cache_store.entries.end();) {
+      if (it->second.expires_at <= now) {
+        it = cache_store.entries.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
+    if (cache_store.entries.size() >= cache_policy.max_entries &&
+        !cache_store.entries.empty()) {
+      auto oldest_it = cache_store.entries.begin();
+      for (auto it = cache_store.entries.begin(); it != cache_store.entries.end();
+           ++it) {
+        if (it->second.last_access < oldest_it->second.last_access) {
+          oldest_it = it;
+        }
+      }
+      cache_store.entries.erase(oldest_it);
+    }
+
+    RouteCacheEntry entry;
+    entry.response = response;
+    entry.last_access = now;
+    entry.expires_at = now + cache_policy.ttl;
+    cache_store.entries[key] = std::move(entry);
   }
 
   template <typename TResult>
@@ -797,7 +950,8 @@ private:
                      std::string summary, std::string description,
                      std::string response_description, THandler &&handler,
                      TRegister &&register_native, int status,
-                     std::string content_type) {
+                     std::string content_type,
+                     std::optional<CachePolicy> cache_policy) {
     using Handler = std::remove_reference_t<THandler>;
     static_assert(
         kIsSupportedHandler<Handler>,
@@ -824,14 +978,37 @@ private:
     };
     registry_->Declare(std::move(route));
 
+    if (cache_policy.has_value()) {
+      cache_policy = NormalizeCachePolicy(std::move(*cache_policy));
+    }
+    const bool cache_enabled = IsCacheEnabled(cache_policy);
+    auto route_cache_store =
+        cache_enabled ? std::make_shared<RouteCacheStore>() : nullptr;
+
     register_native([ctx = &context_, registry = registry_,
                      method_name = std::string(method),
                      route_path = std::string(path), response_status = status,
                      route_key = MakeRouteKey(method, path),
                      response_content_type = std::move(content_type),
+                     cache_policy = std::move(cache_policy),
+                     cache_store = std::move(route_cache_store),
                      fn = std::forward<THandler>(handler)](
                         const httplib::Request &req,
                         httplib::Response &res) mutable {
+      std::optional<std::string> cache_key = std::nullopt;
+      if (cache_store != nullptr && cache_policy.has_value()) {
+        cache_key = BuildCacheKey(req, *cache_policy);
+        if (const auto cached_response =
+                TryReadCachedResponse(*cache_store, *cache_key);
+            cached_response.has_value()) {
+          res.status = cached_response->status;
+          res.set_content(cached_response->body.data(),
+                          cached_response->body.size(),
+                          cached_response->content_type);
+          return;
+        }
+      }
+
       const auto maybe_update_metadata =
           [&](const int status_code, const std::string &content_type,
               Json body, const bool force_update = false) {
@@ -841,6 +1018,15 @@ private:
                                              std::move(body));
             }
           };
+
+      const auto maybe_store_cache = [&](const CachedResponse &response) {
+        if (cache_store == nullptr || !cache_policy.has_value() ||
+            !cache_key.has_value()) {
+          return;
+        }
+        TryStoreCachedResponse(*cache_store, *cache_policy, *cache_key,
+                               response);
+      };
 
       try {
       using CapturedHandler = std::remove_reference_t<decltype(fn)>;
@@ -853,74 +1039,91 @@ private:
       res.status = response_status;
       if constexpr (std::is_same_v<CapturedResult, std::string>) {
         std::string body_text = std::move(value);
-        const std::size_t payload_bytes =
-            body_text.size() * sizeof(std::string::value_type);
-        const std::size_t preview_bytes =
-            std::min(payload_bytes, kPreviewBytes);
-        const std::string_view preview(body_text.data(), preview_bytes);
+        CachedResponse response{response_status, response_content_type,
+                                std::move(body_text)};
 
-        if (ShouldUseDirectOutput(response_content_type, payload_bytes)) {
-          res.set_content(std::move(body_text), response_content_type);
+        if (ShouldUseDirectOutput(response_content_type)) {
+          res.set_content(response.body.data(), response.body.size(),
+                          response.content_type);
+          maybe_store_cache(response);
           return;
         }
 
-        Json body = ToJson(std::move(body_text));
+        Json body = ToJson(response.body);
         std::string serialized_body = body.dump();
-        res.set_content(std::move(serialized_body), response_content_type);
+        response.body = std::move(serialized_body);
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         maybe_update_metadata(response_status, response_content_type,
                               std::move(body));
         return;
       } else if constexpr (std::is_same_v<CapturedResult, std::string_view>) {
-        const std::size_t payload_bytes =
-            value.size() * sizeof(std::string_view::value_type);
-        const std::size_t preview_bytes =
-            std::min(payload_bytes, kPreviewBytes);
-        const std::string_view preview(value.data(), preview_bytes);
+        CachedResponse response{response_status, response_content_type,
+                                std::string(value)};
 
-        if (ShouldUseDirectOutput(response_content_type, payload_bytes)) {
-          res.set_content(value.data(), value.size(), response_content_type);
+        if (ShouldUseDirectOutput(response_content_type)) {
+          res.set_content(response.body.data(), response.body.size(),
+                          response.content_type);
+          maybe_store_cache(response);
           return;
         }
 
-        Json body = ToJson(value);
+        Json body = ToJson(response.body);
         std::string serialized_body = body.dump();
-        res.set_content(std::move(serialized_body), response_content_type);
+        response.body = std::move(serialized_body);
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         maybe_update_metadata(response_status, response_content_type,
                               std::move(body));
         return;
       } else if constexpr (std::is_same_v<CapturedResult, const char *> ||
                            std::is_same_v<CapturedResult, char *>) {
         const char *raw = value == nullptr ? "" : value;
-        const std::size_t payload_bytes = std::strlen(raw) * sizeof(char);
-        const std::size_t preview_bytes =
-            std::min(payload_bytes, kPreviewBytes);
-        const std::string_view preview(raw, preview_bytes);
+        CachedResponse response{response_status, response_content_type,
+                                std::string(raw)};
 
-        if (ShouldUseDirectOutput(response_content_type, payload_bytes)) {
-          res.set_content(raw, payload_bytes, response_content_type);
+        if (ShouldUseDirectOutput(response_content_type)) {
+          res.set_content(response.body.data(), response.body.size(),
+                          response.content_type);
+          maybe_store_cache(response);
           return;
         }
 
-        Json body = ToJson(raw);
+        Json body = ToJson(response.body);
         std::string serialized_body = body.dump();
-        res.set_content(std::move(serialized_body), response_content_type);
+        response.body = std::move(serialized_body);
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         maybe_update_metadata(response_status, response_content_type,
                               std::move(body));
         return;
       } else if constexpr (kIsByteVectorResult<CapturedResult>) {
         const std::size_t payload_bytes =
             value.size() * sizeof(typename CapturedResult::value_type);
-        const char *raw_bytes =
-            payload_bytes == 0 ? ""
-                               : reinterpret_cast<const char *>(value.data());
+        std::string payload_bytes_text;
+        if (payload_bytes > 0) {
+          payload_bytes_text.assign(
+              reinterpret_cast<const char *>(value.data()), payload_bytes);
+        }
 
-        res.set_content(raw_bytes, payload_bytes, response_content_type);
+        CachedResponse response{response_status, response_content_type,
+                                std::move(payload_bytes_text)};
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         return;
       }
 
       Json body = ToJson(std::move(value));
       std::string serialized_body = body.dump();
-      res.set_content(std::move(serialized_body), response_content_type);
+      CachedResponse response{response_status, response_content_type,
+                              std::move(serialized_body)};
+      res.set_content(response.body.data(), response.body.size(),
+                      response.content_type);
+      maybe_store_cache(response);
 
       maybe_update_metadata(response_status, response_content_type,
                             std::move(body));
@@ -931,7 +1134,11 @@ private:
         Json error_body = {{"error", "internal_server_error"},
                            {"message", ex.what()}};
         std::string serialized_error = error_body.dump();
-        res.set_content(std::move(serialized_error), error_content_type);
+        CachedResponse response{500, error_content_type,
+                                std::move(serialized_error)};
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         maybe_update_metadata(500, error_content_type, std::move(error_body),
                               true);
       } catch (...) {
@@ -941,7 +1148,11 @@ private:
         Json error_body = {{"error", "internal_server_error"},
                            {"message", "unknown exception"}};
         std::string serialized_error = error_body.dump();
-        res.set_content(std::move(serialized_error), error_content_type);
+        CachedResponse response{500, error_content_type,
+                                std::move(serialized_error)};
+        res.set_content(response.body.data(), response.body.size(),
+                        response.content_type);
+        maybe_store_cache(response);
         maybe_update_metadata(500, error_content_type, std::move(error_body),
                               true);
       }
@@ -1059,6 +1270,7 @@ private:
   TContext &context_;
   std::shared_ptr<Registry> registry_;
   std::string router_name_;
+  CachePolicyResolver cache_policy_resolver_;
 };
 
 } // namespace httplib::API

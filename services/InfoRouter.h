@@ -3,9 +3,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
+#include <iomanip>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -14,6 +15,10 @@
 
 #include "RouterModule.h"
 
+#if defined(__linux__)
+#include <cstdio>
+#endif
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -21,6 +26,7 @@
 #include <windows.h>
 #elif defined(__APPLE__)
 #include <mach/mach.h>
+#include <sys/sysctl.h>
 #endif
 
 namespace CppServer::Routers {
@@ -29,6 +35,19 @@ class InfoRouter final : public CppServer::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "INFO"; }
 
+  std::optional<httplib::API::CachePolicy>
+  ResolveCachePolicy(const std::string &method,
+                     const std::string &path) const override {
+    if (method != "GET" || path != "/") {
+      return std::nullopt;
+    }
+
+    httplib::API::CachePolicy policy;
+    policy.ttl = std::chrono::milliseconds(100);
+    policy.max_entries = 16;
+    return policy;
+  }
+
   void Register(httplib::API::Router<TContext> &router) override {
     using Clock = std::chrono::steady_clock;
     using SystemClock = std::chrono::system_clock;
@@ -36,7 +55,7 @@ public:
 
     router.Get(
         "/", "Liveness Status",
-        "Get liveness, uptime, host CPU/GPU usage and transport RTT",
+      "Get liveness, uptime, host CPU/memory usage and transport RTT",
         "Runtime health",
         [&](const httplib::Request &req, TContext &ctx) {
           const auto handler_started = Clock::now();
@@ -48,7 +67,7 @@ public:
                   .count();
 
           const auto host_cpu_usage_percent = ReadHostCpuUsagePercent();
-          const auto host_gpu_usage_percent = ReadHostGpuUsagePercent();
+          const auto host_memory_usage = ReadHostMemoryUsage();
 
           const auto now_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                         SystemClock::now().time_since_epoch())
@@ -69,9 +88,15 @@ public:
               {"host_cpu_usage_percent",
                host_cpu_usage_percent ? Json(*host_cpu_usage_percent)
                                       : Json(nullptr)},
-              {"host_gpu_usage_percent",
-               host_gpu_usage_percent ? Json(*host_gpu_usage_percent)
-                                      : Json(nullptr)},
+              {"host_memory_usage_percent",
+               host_memory_usage ? Json(host_memory_usage->usage_percent)
+                                 : Json(nullptr)},
+              {"host_memory_usage_share",
+               host_memory_usage ? Json(FormatMemoryShare(*host_memory_usage))
+                                 : Json(nullptr)},
+              {"host_memory_usage",
+               host_memory_usage ? Json(FormatMemoryUsageReport(*host_memory_usage))
+                                 : Json(nullptr)},
               {"rtt_ms", rtt_ms},
               {"rtt_source", std::move(rtt_source)},
           };
@@ -83,6 +108,47 @@ public:
   }
 
 private:
+  struct MemoryUsage {
+    double usage_percent = 0.0;
+    unsigned long long used_bytes = 0;
+    unsigned long long total_bytes = 0;
+  };
+
+  static std::optional<MemoryUsage>
+  BuildMemoryUsage(unsigned long long total_bytes,
+                   unsigned long long available_bytes) {
+    if (total_bytes == 0 || available_bytes > total_bytes) {
+      return std::nullopt;
+    }
+
+    const unsigned long long used_bytes = total_bytes - available_bytes;
+    const double usage_percent =
+        (static_cast<double>(used_bytes) * 100.0) /
+        static_cast<double>(total_bytes);
+
+    return MemoryUsage{std::clamp(usage_percent, 0.0, 100.0), used_bytes,
+                       total_bytes};
+  }
+
+  static std::string FormatMemoryShare(const MemoryUsage &memory_usage) {
+    constexpr unsigned long long bytes_per_gib = 1024ULL * 1024ULL * 1024ULL;
+    const auto to_rounded_gib = [](unsigned long long bytes) {
+      return (bytes + bytes_per_gib / 2ULL) / bytes_per_gib;
+    };
+
+    const unsigned long long used_gib = to_rounded_gib(memory_usage.used_bytes);
+    const unsigned long long total_gib = to_rounded_gib(memory_usage.total_bytes);
+    return std::to_string(used_gib) + "GB/" + std::to_string(total_gib) +
+           "GB";
+  }
+
+  static std::string FormatMemoryUsageReport(const MemoryUsage &memory_usage) {
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(2) << memory_usage.usage_percent
+           << "% (" << FormatMemoryShare(memory_usage) << ")";
+    return stream.str();
+  }
+
   // CPU usage is computed from two snapshots; the first call warms up state.
   static std::optional<double>
   ComputeUsageFromCounters(unsigned long long idle_ticks,
@@ -210,39 +276,83 @@ private:
 #endif
   }
 
-  static std::optional<double> ReadHostGpuUsagePercent() {
-    // GPU utilization: use nvidia-smi when present; return null when unavailable.
+  static std::optional<MemoryUsage> ReadHostMemoryUsage() {
 #ifdef _WIN32
-    const char *command =
-        "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>NUL";
-    FILE *pipe = _popen(command, "r");
+    // Windows: physical memory totals from GlobalMemoryStatusEx.
+    MEMORYSTATUSEX memory_status{};
+    memory_status.dwLength = sizeof(memory_status);
+    if (!GlobalMemoryStatusEx(&memory_status)) {
+      return std::nullopt;
+    }
+
+    return BuildMemoryUsage(memory_status.ullTotalPhys,
+                            memory_status.ullAvailPhys);
+  #elif defined(__linux__)
+    // Linux: read MemTotal and MemAvailable from /proc/meminfo.
+    FILE *meminfo_file = std::fopen("/proc/meminfo", "r");
+    if (meminfo_file == nullptr) {
+      return std::nullopt;
+    }
+
+    unsigned long long total_kib = 0;
+    unsigned long long available_kib = 0;
+    char line[256] = {0};
+
+    while (std::fgets(line, sizeof(line), meminfo_file) != nullptr) {
+      unsigned long long value_kib = 0;
+      if (std::sscanf(line, "MemTotal: %llu kB", &value_kib) == 1) {
+        total_kib = value_kib;
+        continue;
+      }
+      if (std::sscanf(line, "MemAvailable: %llu kB", &value_kib) == 1) {
+        available_kib = value_kib;
+      }
+    }
+    std::fclose(meminfo_file);
+
+    if (total_kib == 0 || available_kib == 0) {
+      return std::nullopt;
+    }
+
+    return BuildMemoryUsage(total_kib * 1024ULL, available_kib * 1024ULL);
+  #elif defined(__APPLE__)
+    // macOS: total from sysctl, available approximated from VM page stats.
+    std::uint64_t total_bytes = 0;
+    std::size_t total_size = sizeof(total_bytes);
+    if (sysctlbyname("hw.memsize", &total_bytes, &total_size, nullptr, 0) !=
+            0 ||
+        total_bytes == 0) {
+      return std::nullopt;
+    }
+
+    vm_statistics64_data_t vm_stats{};
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                          reinterpret_cast<host_info64_t>(&vm_stats),
+                          &count) != KERN_SUCCESS) {
+      return std::nullopt;
+    }
+
+    vm_size_t page_size = 0;
+    if (host_page_size(mach_host_self(), &page_size) != KERN_SUCCESS) {
+      return std::nullopt;
+    }
+
+    const unsigned long long available_pages =
+        static_cast<unsigned long long>(vm_stats.free_count) +
+        static_cast<unsigned long long>(vm_stats.inactive_count) +
+        static_cast<unsigned long long>(vm_stats.speculative_count);
+    const unsigned long long available_bytes =
+        available_pages * static_cast<unsigned long long>(page_size);
+
+    return BuildMemoryUsage(
+        static_cast<unsigned long long>(total_bytes),
+        std::min(static_cast<unsigned long long>(total_bytes),
+                 available_bytes));
 #else
-    const char *command =
-      "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null";
-    FILE *pipe = popen(command, "r");
+    return std::nullopt;
 #endif
-    if (pipe == nullptr) {
-      return std::nullopt;
-    }
-
-    char buffer[128] = {0};
-    const bool has_line = std::fgets(buffer, sizeof(buffer), pipe) != nullptr;
-#ifdef _WIN32
-    _pclose(pipe);
-#else
-  pclose(pipe);
-#endif
-    if (!has_line) {
-      return std::nullopt;
-    }
-
-    char *end = nullptr;
-    const double parsed = std::strtod(buffer, &end);
-    if (end == buffer) {
-      return std::nullopt;
-    }
-
-    return std::clamp(parsed, 0.0, 100.0);
   }
+
 };
 } // namespace CppServer::Routers

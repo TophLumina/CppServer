@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <stdexcept>
 #include <type_traits>
 #include <typeindex>
@@ -50,8 +51,15 @@ public:
 
   void RegisterAllRoutes() {
     for (const auto &router_module : router_vector_) {
+      auto cache_policy_resolver =
+          [router_module_ptr = router_module.get()](const std::string &method,
+                                                    const std::string &path) {
+            return router_module_ptr->ResolveCachePolicy(method, path);
+          };
+
       httplib::API::Router<TContext> router(server_, context_, api_registry_,
-                                            router_module->RouterName());
+                                            router_module->RouterName(),
+                                            std::move(cache_policy_resolver));
       router_module->Register(router);
     }
   }

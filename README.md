@@ -51,14 +51,30 @@ curl http://127.0.0.1:8080/docs/openapi.json
 
 ## Endpoint behavior / 接口行为
 
-- `/` returns runtime health JSON: `alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_gpu_usage_percent`, `rtt_ms`, `rtt_source`
-- `/` 返回运行时健康 JSON：`alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_gpu_usage_percent`, `rtt_ms`, `rtt_source`
+- `/` returns runtime health JSON: `alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_memory_usage_percent`, `host_memory_usage_share`, `host_memory_usage`, `rtt_ms`, `rtt_source`
+- `/` 返回运行时健康 JSON：`alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_memory_usage_percent`, `host_memory_usage_share`, `host_memory_usage`, `rtt_ms`, `rtt_source`
 - `/sample` returns plain text ASCII art
 - `/sample` 返回纯文本 ASCII 字符画
 - `/docs` serves Swagger UI
 - `/docs` 提供 Swagger UI
 - `/docs/openapi.json` returns OpenAPI JSON
 - `/docs/openapi.json` 返回 OpenAPI JSON
+
+## Cache policy / 缓存策略
+
+- Cache policy is declared in each router via `ResolveCachePolicy(method, path)`.
+- 缓存策略通过各路由中的 `ResolveCachePolicy(method, path)` 声明。
+- Return `std::nullopt` to disable cache for that endpoint.
+- 返回 `std::nullopt` 表示该端点不启用缓存。
+- API resolves policy once at route registration time and applies it in endpoint runtime handlers.
+- API 在路由注册阶段解析策略，并在端点运行时处理逻辑中应用。
+
+Current policies in this project / 当前项目策略：
+
+- `GET /`: enabled, TTL=`100ms`, `max_entries=16`
+- `GET /`：启用缓存，TTL=`100ms`，`max_entries=16`
+- `GET /sample`: disabled (`std::nullopt`)
+- `GET /sample`：不启用缓存（`std::nullopt`）
 
 ## Register a new router / 注册新路由
 
@@ -69,10 +85,12 @@ Use `SampleRouter` as the reference implementation.
 1. 在 `services/` 下新增一个继承 `RouterModule<TContext>` 的路由类。
 2. Implement `RouterName()` and `Register(...)` in that class.
 2. 在该类中实现 `RouterName()` 与 `Register(...)`。
-3. Include the router header in `Core.cpp`.
-3. 在 `Core.cpp` 中包含该路由头文件。
-4. Add one line in startup wiring:
-4. 在启动装配代码中添加一行：
+3. (Optional) implement `ResolveCachePolicy(method, path)` to configure endpoint-level caching.
+3. （可选）实现 `ResolveCachePolicy(method, path)` 以配置端点级缓存策略。
+4. Include the router header in `Core.cpp`.
+4. 在 `Core.cpp` 中包含该路由头文件。
+5. Add one line in startup wiring:
+5. 在启动装配代码中添加一行：
 
 ```cpp
 services.AddRouter<CppServer::Routers::YourRouter<Utils::AppContext>>();
