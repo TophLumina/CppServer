@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -155,6 +154,42 @@ struct ApiTypeTraits<std::vector<TValue, TAllocator>, void> {
   }
 };
 
+template <typename TAllocator>
+struct ApiTypeTraits<std::vector<std::uint8_t, TAllocator>, void> {
+  static std::string CppType() { return "std::vector<std::uint8_t>"; }
+  static Json Schema() {
+    return {{"type", "string"}, {"format", "binary"}};
+  }
+
+  template <typename TValue> static Json ToJson(TValue &&value) {
+    return Json(std::forward<TValue>(value));
+  }
+};
+
+template <typename TAllocator>
+struct ApiTypeTraits<std::vector<std::byte, TAllocator>, void> {
+  static std::string CppType() { return "std::vector<std::byte>"; }
+  static Json Schema() {
+    return {{"type", "string"}, {"format", "binary"}};
+  }
+
+  template <typename TValue> static Json ToJson(TValue &&value) {
+    return Json(std::forward<TValue>(value));
+  }
+};
+
+template <typename TAllocator>
+struct ApiTypeTraits<std::vector<char, TAllocator>, void> {
+  static std::string CppType() { return "std::vector<char>"; }
+  static Json Schema() {
+    return {{"type", "string"}, {"format", "binary"}};
+  }
+
+  template <typename TValue> static Json ToJson(TValue &&value) {
+    return Json(std::forward<TValue>(value));
+  }
+};
+
 template <typename TValue> struct ApiTypeTraits<std::optional<TValue>, void> {
   static std::string CppType() {
     return "std::optional<" + ApiTypeTraits<std::decay_t<TValue>>::CppType() +
@@ -256,25 +291,6 @@ inline bool IsJsonMimeType(const std::string &content_type) {
   return mime.size() >= json_suffix.size() &&
          mime.compare(mime.size() - json_suffix.size(), json_suffix.size(),
                       json_suffix) == 0;
-}
-
-/// 直出通道的文档样例采用轻量摘要，避免将大响应体再次深拷贝到元数据。
-inline Json MakeDirectBodySample(const std::string &content_type,
-                                 const std::size_t payload_bytes,
-                                 std::string_view preview = {}) {
-  Json sample = {
-      {"direct_stream", true},
-      {"content_type", ExtractMimeType(content_type)},
-      {"payload_bytes", payload_bytes},
-  };
-
-  if (!preview.empty()) {
-    sample["preview"] = std::string(preview);
-  }
-  if (preview.size() < payload_bytes) {
-    sample["preview_truncated"] = true;
-  }
-  return sample;
 }
 
 /// 基于样例 JSON 推导一个尽量简洁的 Schema（用于兜底场景）。
