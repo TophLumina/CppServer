@@ -1,61 +1,70 @@
 #pragma once
 
-#include <atomic>
-#include <chrono>
 #include <memory>
+#include <stdexcept>
+#include <type_traits>
+#include <typeindex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <httplib.h>
-#include <nlohmann/json.hpp>
 
-#include "API.h"
+#include "RouterModule.h"
 
 namespace CppServer::Services {
-template <typename TContext>
-void RegisterRoutes(httplib::Server &server, TContext &context) {
-  using Clock = std::chrono::steady_clock;
-  using Json = nlohmann::json;
-  auto api_registry = std::make_shared<httplib::API::Registry>();
-  httplib::API::Router<TContext> router(server, context,
-                                        std::move(api_registry), "INFO");
+template <typename TContext> class Services {
+public:
+  explicit Services(httplib::Server &server, TContext &context,
+                    std::shared_ptr<httplib::API::Registry> api_registry =
+                        std::make_shared<httplib::API::Registry>())
+      : server_(server), context_(context),
+        api_registry_(std::move(api_registry)) {}
 
-  router.Get(
-      "/", "Runtime Status",
-      "Get current uptime and total request count", "Runtime counters",
-      [&](const httplib::Request &, TContext &ctx) {
-        ctx.request_count.fetch_add(1, std::memory_order_relaxed);
+  template <typename TRouter, typename... TArgs>
+  TRouter &AddRouter(TArgs &&...args) {
+    static_assert(std::is_base_of_v<RouterModule<TContext>, TRouter>,
+                  "TRouter must derive from RouterModule<TContext>");
 
-        const auto uptime_seconds =
-            std::chrono::duration_cast<std::chrono::seconds>(Clock::now() -
-                                                             ctx.start_time)
-                .count();
+    const std::type_index router_type = std::type_index(typeid(TRouter));
+    if (router_index_map_.find(router_type) != router_index_map_.end()) {
+      throw std::logic_error("Router already added: " +
+                             std::string(typeid(TRouter).name()));
+    }
 
-        return Json{{"ok", true},
-                    {"uptime_seconds", uptime_seconds},
-                    {"request_count",
-                     ctx.request_count.load(std::memory_order_relaxed)}};
-      });
+    auto instance = std::make_unique<TRouter>(std::forward<TArgs>(args)...);
+    const std::size_t index = router_vector_.size();
+    router_index_map_.emplace(router_type, index);
+    router_vector_.push_back(std::move(instance));
+    return static_cast<TRouter &>(*router_vector_.back());
+  }
 
-  router.Get(
-      "/request-status", "Request Echo", "Echo request meta with server runtime",
-      "Echo payload",
-      [&](const httplib::Request &req, TContext &ctx) {
-        ctx.request_count.fetch_add(1, std::memory_order_relaxed);
+  template <typename TRouter> TRouter *FindRouter() {
+    const auto found = router_index_map_.find(std::type_index(typeid(TRouter)));
+    if (found == router_index_map_.end()) {
+      return nullptr;
+    }
 
-        const auto uptime_seconds =
-            std::chrono::duration_cast<std::chrono::seconds>(Clock::now() -
-                                                             ctx.start_time)
-                .count();
+    return static_cast<TRouter *>(router_vector_[found->second].get());
+  }
 
-        return Json{{"ok", true},
-                    {"method", req.method},
-                    {"path", req.path},
-                    {"uptime_seconds", uptime_seconds},
-                    {"request_count",
-                     ctx.request_count.load(std::memory_order_relaxed)}};
-      });
+  void RegisterAllRoutes() {
+    for (const auto &router_module : router_vector_) {
+      httplib::API::Router<TContext> router(server_, context_, api_registry_,
+                                            router_module->RouterName());
+      router_module->Register(router);
+    }
+  }
 
-  router.RegisterSwaggerUI("CppServer API", "1.0.0",
-                           "Auto-generated routes and response metadata docs",
-                           "/docs", "/docs/openapi.json");
-}
+  std::shared_ptr<httplib::API::Registry> ApiRegistry() const {
+    return api_registry_;
+  }
+
+private:
+  httplib::Server &server_;
+  TContext &context_;
+  std::shared_ptr<httplib::API::Registry> api_registry_;
+  std::vector<std::unique_ptr<RouterModule<TContext>>> router_vector_;
+  std::unordered_map<std::type_index, std::size_t> router_index_map_;
+};
 } // namespace CppServer::Services

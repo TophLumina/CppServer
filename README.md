@@ -9,8 +9,8 @@ The current version tries to listen on the following ports:
 - `8080`
 - `8081`
 
-If a preferred port is unavailable, the server automatically falls back to any available port.
-如果某个首选端口不可用，服务会自动回退并绑定到可用端口。
+If binding a preferred port fails, the process aborts immediately.
+如果某个首选端口绑定失败，进程会立刻中止（abort）。
 
 ## 1) Build image / 构建镜像
 
@@ -44,18 +44,45 @@ You can use any bound port (example below uses `8080`).
 
 ```powershell
 curl http://127.0.0.1:8080/
-curl http://127.0.0.1:8080/status
-curl http://127.0.0.1:8080/request-status
+curl http://127.0.0.1:8080/sample
+curl http://127.0.0.1:8080/docs
+curl http://127.0.0.1:8080/docs/openapi.json
 ```
 
 ## Endpoint behavior / 接口行为
 
-- `/` returns JSON: `ok`, `message`
-- `/` 返回 JSON：`ok`, `message`
-- `/status` returns JSON: `ok`, `uptime_seconds`, `request_count`
-- `/status` 返回 JSON：`ok`, `uptime_seconds`, `request_count`
-- `/request-status` returns JSON: `ok`, `method`, `path`, `uptime_seconds`, `request_count`
-- `/request-status` 返回 JSON：`ok`, `method`, `path`, `uptime_seconds`, `request_count`
+- `/` returns runtime health JSON: `alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_gpu_usage_percent`, `rtt_ms`, `rtt_source`
+- `/` 返回运行时健康 JSON：`alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_gpu_usage_percent`, `rtt_ms`, `rtt_source`
+- `/sample` returns plain text ASCII art
+- `/sample` 返回纯文本 ASCII 字符画
+- `/docs` serves Swagger UI
+- `/docs` 提供 Swagger UI
+- `/docs/openapi.json` returns OpenAPI JSON
+- `/docs/openapi.json` 返回 OpenAPI JSON
+
+## Register a new router / 注册新路由
+
+Use `SampleRouter` as the reference implementation.
+可参考 `SampleRouter` 作为实现模板。
+
+1. Create a new router class in `services/` that derives from `RouterModule<TContext>`.
+1. 在 `services/` 下新增一个继承 `RouterModule<TContext>` 的路由类。
+2. Implement `RouterName()` and `Register(...)` in that class.
+2. 在该类中实现 `RouterName()` 与 `Register(...)`。
+3. Include the router header in `Core.cpp`.
+3. 在 `Core.cpp` 中包含该路由头文件。
+4. Add one line in startup wiring:
+4. 在启动装配代码中添加一行：
+
+```cpp
+services.AddRouter<CppServer::Routers::YourRouter<Utils::AppContext>>();
+```
+
+Reference:
+参考：
+
+- `services/SampleRouter.h` (`SampleRouter`)
+- `Core.cpp` (router wiring with `services.AddRouter<...>()`)
 
 ## Expose to external network / 对外网络暴露
 

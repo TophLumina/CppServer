@@ -1,4 +1,8 @@
+#include <cstdlib>
+
 #include "Core.h"
+#include "services/InfoRouter.h"
+#include "services/SampleRouter.h"
 #include "services/Services.h"
 
 namespace CppServer::Core {
@@ -11,23 +15,23 @@ void Server::Start() {
   for (const int preferred_port : context.options.preferred_ports) {
     auto server = std::make_shared<httplib::Server>();
     server->new_task_queue = [&worker_pool = context.worker_pool] {
-      auto task_queue = std::make_unique<SharedTaskQueue<ThreadPool>>(worker_pool);
+      auto task_queue =
+          std::make_unique<SharedTaskQueue<ThreadPool>>(worker_pool);
       return task_queue.release();
     };
-    Services::RegisterRoutes(*server, context);
 
-    int actual_port = -1;
-    if (server->bind_to_port(context.options.host, preferred_port)) {
-      actual_port = preferred_port;
-    } else {
-      actual_port = server->bind_to_any_port(context.options.host);
+    CppServer::Services::Services<Utils::AppContext> services(*server, context);
+    services.AddRouter<CppServer::Routers::InfoRouter<Utils::AppContext>>();
+    services.AddRouter<CppServer::Routers::SampleRouter<Utils::AppContext>>();
+    services.RegisterAllRoutes();
+
+    if (!server->bind_to_port(context.options.host, preferred_port)) {
+      std::cerr << "Failed to bind listener on " << context.options.host << ":"
+                << preferred_port << ". Aborting.\n";
+      std::abort();
     }
 
-    if (actual_port < 0) {
-      std::cerr << "Failed to bind listener for preferred port "
-                << preferred_port << "\n";
-      continue;
-    }
+    const int actual_port = preferred_port;
 
     bound_ports.push_back(actual_port);
     servers.push_back(std::move(server));

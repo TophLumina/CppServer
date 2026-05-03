@@ -9,7 +9,7 @@
 
 namespace CppServer::Utils {
 constexpr std::size_t PORT_COUNT = 2;
-constexpr std::size_t WORKER_THREADS = 12;
+inline const std::size_t WORKER_THREADS = std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 4;
 struct ServerOptions {
   std::string host = "0.0.0.0";
   std::array<int, PORT_COUNT> preferred_ports = {8080, 8081};
