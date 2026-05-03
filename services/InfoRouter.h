@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -153,15 +154,24 @@ private:
   static std::optional<double>
   ComputeUsageFromCounters(unsigned long long idle_ticks,
                            unsigned long long total_ticks) {
-    thread_local unsigned long long previous_idle = 0;
-    thread_local unsigned long long previous_total = 0;
-    thread_local bool initialized = false;
+    static std::mutex state_mutex;
+    static unsigned long long previous_idle = 0;
+    static unsigned long long previous_total = 0;
+    static bool initialized = false;
+
+    std::lock_guard<std::mutex> lock(state_mutex);
 
     if (!initialized) {
       previous_idle = idle_ticks;
       previous_total = total_ticks;
       initialized = true;
-      return std::nullopt;
+      return 0.0;
+    }
+
+    if (idle_ticks < previous_idle || total_ticks < previous_total) {
+      previous_idle = idle_ticks;
+      previous_total = total_ticks;
+      return 0.0;
     }
 
     const unsigned long long idle_delta = idle_ticks - previous_idle;
@@ -171,7 +181,7 @@ private:
     previous_total = total_ticks;
 
     if (total_delta == 0 || idle_delta > total_delta) {
-      return std::nullopt;
+      return 0.0;
     }
 
     const double usage =
