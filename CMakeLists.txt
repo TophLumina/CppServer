@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(cpp_status_server LANGUAGES CXX)
 
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -19,10 +23,23 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(httplib)
 FetchContent_MakeAvailable(nlohmann_json)
 
-add_subdirectory("ThreadPool dll")
+add_subdirectory("utils/ThreadPool dll")
+add_subdirectory("utils/API")
 
-add_executable(server main.cpp Core.h Utils.h Services.h Core.cpp)
+file(GLOB_RECURSE SERVICE_HEADERS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/services/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/services/*.hpp"
+)
+
+add_executable(server 
+  main.cpp
+  Core.h
+  Utils.h
+  Core.cpp
+  ${SERVICE_HEADERS}
+)
 target_link_libraries(server PRIVATE 
+  httplib::API
   httplib::httplib 
   ThreadPool::ThreadPool
   nlohmann_json::nlohmann_json

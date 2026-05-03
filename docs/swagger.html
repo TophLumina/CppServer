@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CppServer API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #f5f5f7;
+      }
+
+      #swagger-ui {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .opblock-tag-section {
+        border-left: 6px solid transparent;
+        margin-bottom: 14px;
+        padding-left: 8px;
+        border-radius: 6px;
+      }
+
+      .opblock-tag {
+        border-left: 6px solid transparent;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      (function () {
+        function hashString(text) {
+          var hash = 0;
+          for (var i = 0; i < text.length; i += 1) {
+            hash = (hash * 31 + text.charCodeAt(i)) % 360;
+          }
+          return hash;
+        }
+
+        function paletteForRouter(routerName) {
+          var hue = hashString(routerName || "default");
+          return {
+            border: "hsl(" + hue + " 70% 48%)",
+            headerBg: "hsl(" + hue + " 90% 94%)",
+            text: "hsl(" + hue + " 55% 24%)"
+          };
+        }
+
+        function colorizeRouters() {
+          var sections = document.querySelectorAll(".opblock-tag-section");
+          sections.forEach(function (section) {
+            var tag = section.querySelector(".opblock-tag");
+            if (!tag) {
+              return;
+            }
+
+            var routerName =
+              tag.getAttribute("data-tag") || tag.textContent.trim() || "default";
+            var palette = paletteForRouter(routerName);
+
+            section.style.borderLeftColor = palette.border;
+            tag.style.borderLeftColor = palette.border;
+            tag.style.background = palette.headerBg;
+            tag.style.color = palette.text;
+
+            section.querySelectorAll(".opblock").forEach(function (op) {
+              op.style.borderLeft = "4px solid " + palette.border;
+            });
+          });
+        }
+
+        function installColorObserver() {
+          var root = document.getElementById("swagger-ui");
+          if (!root) {
+            return;
+          }
+
+          var pending = false;
+          var observer = new MutationObserver(function () {
+            if (pending) {
+              return;
+            }
+            pending = true;
+            requestAnimationFrame(function () {
+              pending = false;
+              colorizeRouters();
+            });
+          });
+
+          observer.observe(root, { childList: true, subtree: true });
+        }
+
+        var basePath = window.location.pathname.replace(/\/$/, "");
+        var openapiUrl = window.location.origin + basePath + "/openapi.json";
+
+        SwaggerUIBundle({
+          url: openapiUrl,
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          presets: [SwaggerUIBundle.presets.apis],
+          layout: "BaseLayout",
+          onComplete: function () {
+            colorizeRouters();
+            installColorObserver();
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

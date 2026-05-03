@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /app/runtime/server /app/server
 COPY --from=build /app/runtime/lib /app/lib
+COPY --from=build /app/docs /app/docs
 
 ENV LD_LIBRARY_PATH=/app/lib
 

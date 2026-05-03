@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(httplib)
+find_dependency(nlohmann_json)
+
+include("${CMAKE_CURRENT_LIST_DIR}/CppServerAPITargets.cmake")
+
+if(TARGET httplib::API)
+	set_property(TARGET httplib::API APPEND PROPERTY
+		INTERFACE_LINK_LIBRARIES
+			httplib::httplib
+			nlohmann_json::nlohmann_json
+	)
+endif()
+
+check_required_components(CppServerAPI)
