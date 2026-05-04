@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
-#include <iomanip>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -87,10 +87,12 @@ public:
               {"alive", true},
               {"uptime_seconds", uptime_seconds},
               {"host_cpu_usage_percent",
-               host_cpu_usage_percent ? Json(*host_cpu_usage_percent)
+               host_cpu_usage_percent
+                   ? Json(ToDisplayPercent(*host_cpu_usage_percent))
                                       : Json(nullptr)},
               {"host_memory_usage_percent",
-               host_memory_usage ? Json(host_memory_usage->usage_percent)
+               host_memory_usage
+                   ? Json(ToDisplayPercent(host_memory_usage->usage_percent))
                                  : Json(nullptr)},
               {"host_memory_usage_share",
                host_memory_usage ? Json(FormatMemoryShare(*host_memory_usage))
@@ -114,6 +116,10 @@ private:
     unsigned long long used_bytes = 0;
     unsigned long long total_bytes = 0;
   };
+
+  static int ToDisplayPercent(double usage_percent) {
+    return static_cast<int>(std::lround(std::clamp(usage_percent, 0.0, 100.0)));
+  }
 
   static std::optional<MemoryUsage>
   BuildMemoryUsage(unsigned long long total_bytes,
@@ -145,8 +151,8 @@ private:
 
   static std::string FormatMemoryUsageReport(const MemoryUsage &memory_usage) {
     std::ostringstream stream;
-    stream << std::fixed << std::setprecision(2) << memory_usage.usage_percent
-           << "% (" << FormatMemoryShare(memory_usage) << ")";
+    stream << ToDisplayPercent(memory_usage.usage_percent) << "% ("
+           << FormatMemoryShare(memory_usage) << ")";
     return stream.str();
   }
 
