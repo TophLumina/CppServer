@@ -79,39 +79,158 @@ server.Start();
 
 ### 3. 二次开发指南和样例
 
-在已有 `api` service 下加新路由：
+建议先对照这些现有文件再开始改：
 
-1. 新建一个继承 `RouterModule<TContext>` 的 router
-2. 在 `Application.cpp` 中通过 `.AddRouter<...>()` 注册
-3. 重新构建后检查 `/docs`
+- `Application.cpp`：应用装配入口，新增 router / service 最终都要落到这里
+- `ServiceTags.h`：service 的 `Context`、`ID`、`DisplayName` 定义
+- `services/simpleapi/Context.h`：默认 `api` service 的上下文结构
+- `services/simpleapi/DefaultRouter.h` / `services/simpleapi/StatusRouter.h` / `services/simpleapi/SampleRouter.h`：现有 router 写法
+- `services/files/Runtime.h`：不走 `AddRouter(...)`、直接配置底层 `httplib::Server` 的现成例子
+- `RouterModule.h`：router 需要实现的接口定义
 
-最小示例：
+#### 3.1 在已有 `api` service 下新增一个路由
+
+目标：新增 `GET /time`，同时让它自动出现在 `http://127.0.0.1:8080/docs`。
+
+步骤：
+
+1. 新建文件 `services/simpleapi/TimeRouter.h`
+2. 参考 `services/simpleapi/DefaultRouter.h` 或 `services/simpleapi/SampleRouter.h`，实现一个继承 `RouterModule<TContext>` 的 router
+3. 修改 `Application.cpp`，先 `#include "services/simpleapi/TimeRouter.h"`，再在 `api` service 的装配链上追加 `.AddRouter<...>()`
+4. 重新构建并访问 `/time`、`/docs`
+
+新文件：`services/simpleapi/TimeRouter.h`
 
 ```cpp
+#pragma once
+
+#include <string>
+
+#include <nlohmann/json.hpp>
+
+#include "RouterModule.h"
+
+namespace CppServer::Routers {
 template <typename TContext>
 class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "TIME"; }
+
   void Register(httplib::API::Router<TContext> &router) override {
-    router.Get("/time", [](const httplib::Request &) { return "ok"; });
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/time", "Server Time",
+        "Return the current service port to verify router wiring.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"ok", true}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
   }
 };
+} // namespace CppServer::Routers
 ```
 
+修改文件：`Application.cpp`
+
 ```cpp
-.AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+#include "services/simpleapi/TimeRouter.h"
+
+compositor
+    .Compose<ApiServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<ApiServiceContext>(options, 0))
+    .AddRouter<CppServer::Routers::DefaultRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::StatusRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::SampleRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+    .AddSwaggerUI();
 ```
 
-添加新 service：
+说明：
 
-1. 定义新的 `Context`
-2. 定义新的 `ServiceTag`
-3. 编写 router
-4. 在 `Application.cpp` 中 `Compose<NewServiceTag>(...)`
+- `RouterModule<TContext>` 的最小接口只有 `RouterName()` 和 `Register(...)`，定义见 `RouterModule.h`
+- handler 可以只接收 `const httplib::Request &`，也可以像上例一样再接收 `TContext &ctx` 读取运行时上下文
+- 现有 `api` service 已在 `Application.cpp` 调用了 `.AddSwaggerUI()`，所以新 router 注册成功后会自动进入 `/docs`
+- 如果这个新接口要共享状态，优先把状态放到 `services/simpleapi/Context.h` 的 `Context` 里，而不是放全局变量
 
-最小示例：
+验证：
+
+```powershell
+curl http://127.0.0.1:8080/time
+curl http://127.0.0.1:8080/docs
+```
+
+#### 3.2 新增一个新的 routing service
+
+目标：新增一个独立的 `admin` service，监听 `8090`，提供 `GET /admin/ping`。
+
+步骤：
+
+1. 新建 `services/admin/Context.h`，定义这个 service 自己的 runtime 上下文和默认端口
+2. 新建 `services/admin/AdminRouter.h`，写该 service 的路由
+3. 修改 `ServiceTags.h`，把新 service 暴露成一个新的 `ServiceTag`
+4. 修改 `Application.cpp`，先包含新 router 头文件，再通过 `.Compose<AdminServiceTag>(...)` 把它装配进去
+5. 如果你使用 `ServerOptions::service_port_overrides`，记得给新 service 预留新的下标；按当前 `Application.cpp` 的装配顺序，`api -> file -> admin` 分别对应 `0 / 1 / 2`
+
+新文件：`services/admin/Context.h`
 
 ```cpp
+#pragma once
+
+#include <cstddef>
+
+namespace CppServer::Services::Admin {
+struct Context {
+  static constexpr int DEFAULT_PORT_BEGIN = 8090;
+  static constexpr std::size_t DEFAULT_PORT_COUNT = 1;
+
+  explicit Context(int listening_port = DEFAULT_PORT_BEGIN)
+      : port(listening_port) {}
+
+  int port;
+};
+} // namespace CppServer::Services::Admin
+```
+
+新文件：`services/admin/AdminRouter.h`
+
+```cpp
+#pragma once
+
+#include <string>
+
+#include <nlohmann/json.hpp>
+
+#include "RouterModule.h"
+
+namespace CppServer::Routers {
+template <typename TContext>
+class AdminRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  std::string RouterName() const override { return "ADMIN"; }
+
+  void Register(httplib::API::Router<TContext> &router) override {
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/admin/ping", "Admin Ping", "Health check for admin service.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"service", "admin"}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
+  }
+};
+} // namespace CppServer::Routers
+```
+
+修改文件：`ServiceTags.h`
+
+```cpp
+#include "services/admin/Context.h"
+
 struct Admin {
   using Context = CppServer::Services::Admin::Context;
   static constexpr std::uint16_t ID = 10;
@@ -119,10 +238,45 @@ struct Admin {
 };
 ```
 
+修改文件：`Application.cpp`
+
+```cpp
+#include "services/admin/AdminRouter.h"
+
+using AdminServiceTag = CppServer::Core::ServiceTags::Admin;
+using AdminServiceContext = AdminServiceTag::Context;
+
+compositor
+    .Compose<AdminServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<AdminServiceContext>(options, 2))
+    .AddRouter<CppServer::Routers::AdminRouter<AdminServiceContext>>()
+    .AddSwaggerUI();
+```
+
+验证：
+
+```powershell
+curl http://127.0.0.1:8090/admin/ping
+curl http://127.0.0.1:8090/docs
+```
+
+#### 3.3 什么时候用 `AddRouter(...)`，什么时候用 `ConfigureHttpServer(...)`
+
+- 普通 JSON / 文本接口：优先走 `RouterModule<TContext>` + `.AddRouter<...>()`
+- 想直接挂静态目录、`pre_routing_handler`、底层 `httplib::Server` 行为：参考 `services/files/Runtime.h`，在 `Application.cpp` 里使用 `.ConfigureHttpServer(...)`
+
+最小示意：
+
 ```cpp
 compositor
-    .Compose<Admin>(CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID, {8090, 1})
-    .AddRouter<CppServer::Routers::AdminRouter<Admin::Context>>();
+    .Compose<FileServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<FileServiceContext>(options, 1))
+    .ConfigureHttpServer([](httplib::Server &http_server,
+                            FileServiceContext &file_context, int) {
+      CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+    });
 ```
 
 二开建议：
@@ -237,37 +391,158 @@ server.Start();
 
 ### 3. Extension Guide and Examples
 
-To add a new router to the existing `api` service:
+Start from these files before extending the project:
 
-1. create a router derived from `RouterModule<TContext>`
-2. register it in `Application.cpp` with `.AddRouter<...>()`
-3. rebuild and check `/docs`
+- `Application.cpp`: composition entry where new routers and services are wired
+- `ServiceTags.h`: defines `Context`, `ID`, and `DisplayName` for each service
+- `services/simpleapi/Context.h`: runtime context of the default `api` service
+- `services/simpleapi/DefaultRouter.h` / `services/simpleapi/StatusRouter.h` / `services/simpleapi/SampleRouter.h`: concrete router examples
+- `services/files/Runtime.h`: example of configuring raw `httplib::Server` behavior instead of adding routers
+- `RouterModule.h`: router interface definition
 
-Minimal example:
+#### 3.1 Add a router to the existing `api` service
+
+Goal: add `GET /time` and have it appear automatically in `http://127.0.0.1:8080/docs`.
+
+Steps:
+
+1. create `services/simpleapi/TimeRouter.h`
+2. implement a router derived from `RouterModule<TContext>` by following `services/simpleapi/DefaultRouter.h` or `services/simpleapi/SampleRouter.h`
+3. update `Application.cpp`: add `#include "services/simpleapi/TimeRouter.h"` and append `.AddRouter<...>()` to the `api` composition chain
+4. rebuild and verify `/time` and `/docs`
+
+New file: `services/simpleapi/TimeRouter.h`
 
 ```cpp
+#pragma once
+
+#include <string>
+
+#include <nlohmann/json.hpp>
+
+#include "RouterModule.h"
+
+namespace CppServer::Routers {
 template <typename TContext>
 class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "TIME"; }
+
   void Register(httplib::API::Router<TContext> &router) override {
-    router.Get("/time", [](const httplib::Request &) { return "ok"; });
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/time", "Server Time",
+        "Return the current service port to verify router wiring.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"ok", true}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
   }
 };
+} // namespace CppServer::Routers
 ```
 
+Updated file: `Application.cpp`
+
 ```cpp
-.AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+#include "services/simpleapi/TimeRouter.h"
+
+compositor
+    .Compose<ApiServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<ApiServiceContext>(options, 0))
+    .AddRouter<CppServer::Routers::DefaultRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::StatusRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::SampleRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+    .AddSwaggerUI();
 ```
 
-To add a new service:
+Notes:
 
-1. define a new `Context`
-2. define a new `ServiceTag`
-3. implement a router
-4. compose it with `Compose<NewServiceTag>(...)`
+- `RouterModule<TContext>` only requires `RouterName()` and `Register(...)`; see `RouterModule.h`
+- handlers can accept only `const httplib::Request &`, or accept `TContext &ctx` as shown above when runtime state is needed
+- the existing `api` service already calls `.AddSwaggerUI()` in `Application.cpp`, so newly registered routers are included in `/docs`
+- if a new route needs shared runtime state, prefer extending `services/simpleapi/Context.h` over introducing global variables
+
+Validation:
+
+```powershell
+curl http://127.0.0.1:8080/time
+curl http://127.0.0.1:8080/docs
+```
+
+#### 3.2 Add a new routing service
+
+Goal: add a dedicated `admin` service on port `8090` with `GET /admin/ping`.
+
+Steps:
+
+1. create `services/admin/Context.h` for the runtime context and default port
+2. create `services/admin/AdminRouter.h` for the routes
+3. update `ServiceTags.h` to expose the new service as a `ServiceTag`
+4. update `Application.cpp` to include the new router and compose the new service with `.Compose<AdminServiceTag>(...)`
+5. if you use `ServerOptions::service_port_overrides`, reserve a new index for the service; with the current composition order in `Application.cpp`, `api -> file -> admin` maps to `0 / 1 / 2`
+
+New file: `services/admin/Context.h`
 
 ```cpp
+#pragma once
+
+#include <cstddef>
+
+namespace CppServer::Services::Admin {
+struct Context {
+  static constexpr int DEFAULT_PORT_BEGIN = 8090;
+  static constexpr std::size_t DEFAULT_PORT_COUNT = 1;
+
+  explicit Context(int listening_port = DEFAULT_PORT_BEGIN)
+      : port(listening_port) {}
+
+  int port;
+};
+} // namespace CppServer::Services::Admin
+```
+
+New file: `services/admin/AdminRouter.h`
+
+```cpp
+#pragma once
+
+#include <string>
+
+#include <nlohmann/json.hpp>
+
+#include "RouterModule.h"
+
+namespace CppServer::Routers {
+template <typename TContext>
+class AdminRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  std::string RouterName() const override { return "ADMIN"; }
+
+  void Register(httplib::API::Router<TContext> &router) override {
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/admin/ping", "Admin Ping", "Health check for admin service.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"service", "admin"}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
+  }
+};
+} // namespace CppServer::Routers
+```
+
+Updated file: `ServiceTags.h`
+
+```cpp
+#include "services/admin/Context.h"
+
 struct Admin {
   using Context = CppServer::Services::Admin::Context;
   static constexpr std::uint16_t ID = 10;
@@ -275,10 +550,45 @@ struct Admin {
 };
 ```
 
+Updated file: `Application.cpp`
+
+```cpp
+#include "services/admin/AdminRouter.h"
+
+using AdminServiceTag = CppServer::Core::ServiceTags::Admin;
+using AdminServiceContext = AdminServiceTag::Context;
+
+compositor
+    .Compose<AdminServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<AdminServiceContext>(options, 2))
+    .AddRouter<CppServer::Routers::AdminRouter<AdminServiceContext>>()
+    .AddSwaggerUI();
+```
+
+Validation:
+
+```powershell
+curl http://127.0.0.1:8090/admin/ping
+curl http://127.0.0.1:8090/docs
+```
+
+#### 3.3 When to use `AddRouter(...)` vs `ConfigureHttpServer(...)`
+
+- Regular JSON or text endpoints: prefer `RouterModule<TContext>` plus `.AddRouter<...>()`
+- Static directory serving, `pre_routing_handler`, or other raw `httplib::Server` behavior: follow `services/files/Runtime.h` and wire it in `Application.cpp` with `.ConfigureHttpServer(...)`
+
+Minimal pattern:
+
 ```cpp
 compositor
-    .Compose<Admin>(CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID, {8090, 1})
-    .AddRouter<CppServer::Routers::AdminRouter<Admin::Context>>();
+    .Compose<FileServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<FileServiceContext>(options, 1))
+    .ConfigureHttpServer([](httplib::Server &http_server,
+                            FileServiceContext &file_context, int) {
+      CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+    });
 ```
 
 Extension advice:
