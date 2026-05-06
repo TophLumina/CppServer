@@ -24,7 +24,8 @@ public:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       const auto existing = entries_.find(path_key);
-      if (existing != entries_.end() && MetadataMatches(existing->second, *metadata) &&
+      if (existing != entries_.end() &&
+          MetadataMatches(existing->second, *metadata) &&
           existing->second.mapped_file != nullptr &&
           existing->second.mapped_file->is_open()) {
         existing->second.last_access_token = ++access_token_;
@@ -73,7 +74,8 @@ private:
       return std::nullopt;
     }
 
-    const auto last_write_time = std::filesystem::last_write_time(file_path, error);
+    const auto last_write_time =
+        std::filesystem::last_write_time(file_path, error);
     if (error) {
       return std::nullopt;
     }
@@ -100,8 +102,10 @@ private:
   void EvictIfNeededLocked() {
     while (entries_.size() > kMaxEntries) {
       auto oldest = entries_.begin();
-      for (auto current = entries_.begin(); current != entries_.end(); ++current) {
-        if (current->second.last_access_token < oldest->second.last_access_token) {
+      for (auto current = entries_.begin(); current != entries_.end();
+           ++current) {
+        if (current->second.last_access_token <
+            oldest->second.last_access_token) {
           oldest = current;
         }
       }

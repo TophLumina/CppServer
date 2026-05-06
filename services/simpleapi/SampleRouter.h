@@ -21,15 +21,14 @@ public:
     router.Get(
         "/sample/asciiart", "Sample ASCII Art",
         "Return ASCII text art for Markdown/Reddit/Manifold style rendering",
-        "ASCII text",
-        [](const httplib::Request &) {
-          return asciiart;
-        },
-        httplib::API::RouteOptions{.content_type = "text/plain; charset=utf-8"});
+        "ASCII text", [](const httplib::Request &) { return asciiart; },
+        httplib::API::RouteOptions{.content_type =
+                                       "text/plain; charset=utf-8"});
 
     router.Get(
         "/sample/randomint", "Sample random integer",
-        "Return a Mersenne Twister integer in the inclusive [min, max] interval. Query params: min, max.",
+        "Return a Mersenne Twister integer in the inclusive [min, max] "
+        "interval. Query params: min, max.",
         "Random integer or null when query params are missing or invalid",
         [](const httplib::Request &req) -> std::optional<int> {
           const auto min_value = Self::ParseIntParam(req, "min");
@@ -42,18 +41,15 @@ public:
               std::minmax(*min_value, *max_value);
           return Self::GenerateRandomInt(lower_bound, upper_bound);
         },
-        httplib::API::RouteOptions{.parameters =
-                                       {httplib::API::Parameter<int>(
-                                            httplib::API::ParameterLocation::Query,
-                                            "min",
-                                            "Inclusive lower bound for the random integer.",
-                                            true, httplib::API::Json(3)),
-                                        httplib::API::Parameter<int>(
-                                            httplib::API::ParameterLocation::Query,
-                                            "max",
-                                            "Inclusive upper bound for the random integer.",
-                                            true,
-                                            httplib::API::Json(7))}});
+        httplib::API::RouteOptions{
+            .parameters = {httplib::API::Parameter<int>(
+                               httplib::API::ParameterLocation::Query, "min",
+                               "Inclusive lower bound for the random integer.",
+                               true, httplib::API::Json(3)),
+                           httplib::API::Parameter<int>(
+                               httplib::API::ParameterLocation::Query, "max",
+                               "Inclusive upper bound for the random integer.",
+                               true, httplib::API::Json(7))}});
   }
 
 private:
@@ -65,9 +61,10 @@ private:
 
     const std::string value = req.get_param_value(name);
     int parsed_value = 0;
-    const auto [parse_end, parse_error] =
-        std::from_chars(value.data(), value.data() + value.size(), parsed_value);
-    if (parse_error != std::errc() || parse_end != value.data() + value.size()) {
+    const auto [parse_end, parse_error] = std::from_chars(
+        value.data(), value.data() + value.size(), parsed_value);
+    if (parse_error != std::errc() ||
+        parse_end != value.data() + value.size()) {
       return std::nullopt;
     }
 

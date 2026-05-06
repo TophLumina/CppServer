@@ -212,11 +212,10 @@ private:
   void RebuildWatchSet() {
     CloseWatchSet();
 
-    constexpr DWORD notify_filter = FILE_NOTIFY_CHANGE_DIR_NAME |
-                                    FILE_NOTIFY_CHANGE_FILE_NAME |
-                                    FILE_NOTIFY_CHANGE_ATTRIBUTES |
-                                    FILE_NOTIFY_CHANGE_CREATION |
-                                    FILE_NOTIFY_CHANGE_LAST_WRITE;
+    constexpr DWORD notify_filter =
+        FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_FILE_NAME |
+        FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_CREATION |
+        FILE_NOTIFY_CHANGE_LAST_WRITE;
 
     for (const auto &watch_directory : BuildWatchDirectories()) {
       const HANDLE handle = FindFirstChangeNotificationW(
@@ -283,10 +282,9 @@ private:
       return;
     }
 
-    constexpr std::uint32_t watch_mask = IN_CREATE | IN_DELETE |
-                                         IN_MOVED_FROM | IN_MOVED_TO |
-                                         IN_DELETE_SELF | IN_MOVE_SELF |
-                                         IN_ATTRIB;
+    constexpr std::uint32_t watch_mask = IN_CREATE | IN_DELETE | IN_MOVED_FROM |
+                                         IN_MOVED_TO | IN_DELETE_SELF |
+                                         IN_MOVE_SELF | IN_ATTRIB;
 
     for (const auto &watch_directory : BuildWatchDirectories()) {
       inotify_add_watch(inotify_fd_, watch_directory.c_str(), watch_mask);
@@ -353,10 +351,9 @@ private:
       return;
     }
 
-    constexpr std::uint32_t vnode_flags = NOTE_ATTRIB | NOTE_DELETE |
-                                          NOTE_EXTEND | NOTE_LINK |
-                                          NOTE_RENAME | NOTE_REVOKE |
-                                          NOTE_WRITE;
+    constexpr std::uint32_t vnode_flags =
+        NOTE_ATTRIB | NOTE_DELETE | NOTE_EXTEND | NOTE_LINK | NOTE_RENAME |
+        NOTE_REVOKE | NOTE_WRITE;
 
     for (const auto &watch_directory : BuildWatchDirectories()) {
       const int fd = open(watch_directory.c_str(), O_EVTONLY);
@@ -365,8 +362,8 @@ private:
       }
 
       struct kevent change_event;
-      EV_SET(&change_event, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, vnode_flags,
-             0, nullptr);
+      EV_SET(&change_event, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, vnode_flags, 0,
+             nullptr);
       if (kevent(kqueue_fd_, &change_event, 1, nullptr, 0, nullptr) == -1) {
         close(fd);
         continue;

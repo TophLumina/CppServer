@@ -30,13 +30,11 @@ using ServiceKey = std::uint32_t;
 inline constexpr ServiceInstanceId DEFAULT_SERVICE_INSTANCE_ID = 0;
 
 namespace Detail {
-template <typename TServiceTag>
-constexpr ServiceTagId ResolveServiceTagId() {
+template <typename TServiceTag> constexpr ServiceTagId ResolveServiceTagId() {
   static_assert(std::is_integral_v<decltype(TServiceTag::ID)>,
                 "Service tags must define an integral static constexpr ID.");
   static_assert(TServiceTag::ID >= 0 &&
-                    TServiceTag::ID <=
-                        std::numeric_limits<ServiceTagId>::max(),
+                    TServiceTag::ID <= std::numeric_limits<ServiceTagId>::max(),
                 "Service tag IDs must fit in 16 bits.");
   return static_cast<ServiceTagId>(TServiceTag::ID);
 }
@@ -125,17 +123,17 @@ public:
   virtual ~IServiceRuntimeSet() = default;
 
   virtual const std::string &Name() const = 0;
-  virtual void BuildPortIndex(
-      std::unordered_map<int, RuntimeInfo *> &runtime_index) = 0;
-  virtual void Bind(const std::string &host,
-                    std::vector<int> &bound_ports) = 0;
+  virtual void
+  BuildPortIndex(std::unordered_map<int, RuntimeInfo *> &runtime_index) = 0;
+  virtual void Bind(const std::string &host, std::vector<int> &bound_ports) = 0;
   virtual void Start() = 0;
   virtual void Join() = 0;
   virtual void Stop() = 0;
   virtual std::size_t RuntimeCount() const = 0;
 };
 
-template <typename TContext> class ServiceRuntimeSet final : public IServiceRuntimeSet {
+template <typename TContext>
+class ServiceRuntimeSet final : public IServiceRuntimeSet {
 public:
   ServiceRuntimeSet(ServiceKey service_key, ServiceTagId service_tag_id,
                     ServiceInstanceId service_instance_id, std::string name)
@@ -178,12 +176,11 @@ public:
     runtimes_.push_back(std::move(runtime));
   }
 
-  void Bind(const std::string &host,
-            std::vector<int> &bound_ports) override {
+  void Bind(const std::string &host, std::vector<int> &bound_ports) override {
     for (auto &runtime : runtimes_) {
       if (!runtime->http_server->bind_to_port(host, runtime->info.port)) {
-        std::cerr << "Failed to bind listener for " << name_ << " on "
-                  << host << ':' << runtime->info.port << ". Aborting.\n";
+        std::cerr << "Failed to bind listener for " << name_ << " on " << host
+                  << ':' << runtime->info.port << ". Aborting.\n";
         std::abort();
       }
 
@@ -236,11 +233,12 @@ private:
   std::vector<std::unique_ptr<Runtime>> runtimes_;
 };
 
-template <typename TContext> class ComposedService final : public IComposedService {
+template <typename TContext>
+class ComposedService final : public IComposedService {
 public:
   using RegistrationStep = std::function<void(
-  Server &, httplib::Server &, CppServer::Routing::RoutingService<TContext> &,
-      TContext &, int)>;
+      Server &, httplib::Server &,
+      CppServer::Routing::RoutingService<TContext> &, TContext &, int)>;
   using ContextFactory = std::function<std::unique_ptr<TContext>(int)>;
 
   explicit ComposedService(ServiceKey service_key, ServiceTagId service_tag_id,
@@ -249,8 +247,7 @@ public:
                            ContextFactory context_factory = {})
       : service_key_(service_key), service_tag_id_(service_tag_id),
         service_instance_id_(service_instance_id), name_(std::move(name)),
-        port_range_(port_range),
-        context_factory_(std::move(context_factory)) {
+        port_range_(port_range), context_factory_(std::move(context_factory)) {
     if (!context_factory_) {
       context_factory_ = [](int listening_port) {
         return std::make_unique<TContext>(listening_port);
@@ -269,16 +266,16 @@ public:
 
   template <typename TContextFactory>
   ComposedService &SetContextFactory(TContextFactory &&context_factory) {
-    context_factory_ = ContextFactory(std::forward<TContextFactory>(context_factory));
+    context_factory_ =
+        ContextFactory(std::forward<TContextFactory>(context_factory));
     if (!context_factory_) {
-      throw std::logic_error("Composed service context factory must not be empty: " +
-                             name_);
+      throw std::logic_error(
+          "Composed service context factory must not be empty: " + name_);
     }
     return *this;
   }
 
-  template <typename TStep>
-  ComposedService &AddStep(TStep &&step) {
+  template <typename TStep> ComposedService &AddStep(TStep &&step) {
     registration_steps_.emplace_back(std::forward<TStep>(step));
     return *this;
   }
@@ -291,85 +288,78 @@ public:
   template <typename TRouter, typename... TArgs>
   ComposedService &AddRouter(TArgs &&...args) {
     auto router_args = std::make_tuple(std::forward<TArgs>(args)...);
-    return AddStep(
-        [router_args = std::move(router_args)](
-            Server &, httplib::Server &,
-          CppServer::Routing::RoutingService<TContext> &service, TContext &,
-            int) mutable {
-          std::apply(
-              [&service](auto &&...unpacked_args) {
-                service.template RegisterRouter<TRouter>(
-                    std::forward<decltype(unpacked_args)>(unpacked_args)...);
-              },
-              std::move(router_args));
-        });
+    return AddStep([router_args = std::move(router_args)](
+                       Server &, httplib::Server &,
+                       CppServer::Routing::RoutingService<TContext> &service,
+                       TContext &, int) mutable {
+      std::apply(
+          [&service](auto &&...unpacked_args) {
+            service.template RegisterRouter<TRouter>(
+                std::forward<decltype(unpacked_args)>(unpacked_args)...);
+          },
+          std::move(router_args));
+    });
   }
 
-  template <typename... TArgs>
-  ComposedService &AddSwaggerUI(TArgs &&...args) {
+  template <typename... TArgs> ComposedService &AddSwaggerUI(TArgs &&...args) {
     auto swagger_args = std::make_tuple(std::forward<TArgs>(args)...);
-    return AddStep(
-        [swagger_args = std::move(swagger_args)](
-            Server &, httplib::Server &,
-          CppServer::Routing::RoutingService<TContext> &service, TContext &,
-            int) mutable {
-          std::apply(
-              [&service](auto &&...unpacked_args) {
-                service.RegisterSwaggerUI(
-                    std::forward<decltype(unpacked_args)>(unpacked_args)...);
-              },
-              std::move(swagger_args));
-        });
+    return AddStep([swagger_args = std::move(swagger_args)](
+                       Server &, httplib::Server &,
+                       CppServer::Routing::RoutingService<TContext> &service,
+                       TContext &, int) mutable {
+      std::apply(
+          [&service](auto &&...unpacked_args) {
+            service.RegisterSwaggerUI(
+                std::forward<decltype(unpacked_args)>(unpacked_args)...);
+          },
+          std::move(swagger_args));
+    });
   }
 
   template <typename... TArgs>
   ComposedService &AddMountDirectory(TArgs &&...args) {
     auto mount_args = std::make_tuple(std::forward<TArgs>(args)...);
-    return AddStep(
-        [mount_args = std::move(mount_args)](
-            Server &, httplib::Server &,
-          CppServer::Routing::RoutingService<TContext> &service, TContext &,
-            int) mutable {
-          std::apply(
-              [&service](auto &&...unpacked_args) {
-                if (!service.MountDirectory(
-                        std::forward<decltype(unpacked_args)>(unpacked_args)...)) {
-                  throw std::logic_error("Failed to mount directory.");
-                }
-              },
-              std::move(mount_args));
-        });
+    return AddStep([mount_args = std::move(mount_args)](
+                       Server &, httplib::Server &,
+                       CppServer::Routing::RoutingService<TContext> &service,
+                       TContext &, int) mutable {
+      std::apply(
+          [&service](auto &&...unpacked_args) {
+            if (!service.MountDirectory(
+                    std::forward<decltype(unpacked_args)>(unpacked_args)...)) {
+              throw std::logic_error("Failed to mount directory.");
+            }
+          },
+          std::move(mount_args));
+    });
   }
 
-  template <typename... TArgs>
-  ComposedService &AddMountFile(TArgs &&...args) {
+  template <typename... TArgs> ComposedService &AddMountFile(TArgs &&...args) {
     auto mount_args = std::make_tuple(std::forward<TArgs>(args)...);
-    return AddStep(
-        [mount_args = std::move(mount_args)](
-            Server &, httplib::Server &,
-          CppServer::Routing::RoutingService<TContext> &service, TContext &,
-            int) mutable {
-          std::apply(
-              [&service](auto &&...unpacked_args) {
-                if (!service.MountFile(
-                        std::forward<decltype(unpacked_args)>(unpacked_args)...)) {
-                  throw std::logic_error("Failed to mount file.");
-                }
-              },
-              std::move(mount_args));
-        });
+    return AddStep([mount_args = std::move(mount_args)](
+                       Server &, httplib::Server &,
+                       CppServer::Routing::RoutingService<TContext> &service,
+                       TContext &, int) mutable {
+      std::apply(
+          [&service](auto &&...unpacked_args) {
+            if (!service.MountFile(
+                    std::forward<decltype(unpacked_args)>(unpacked_args)...)) {
+              throw std::logic_error("Failed to mount file.");
+            }
+          },
+          std::move(mount_args));
+    });
   }
 
   template <typename TConfigure>
   ComposedService &ConfigureHttpServer(TConfigure &&configure_http_server) {
-    return AddStep(
-        [configure_http_server =
-             std::forward<TConfigure>(configure_http_server)](
-            Server &, httplib::Server &http_server,
-          CppServer::Routing::RoutingService<TContext> &, TContext &context,
-            const int listening_port) mutable {
-          configure_http_server(http_server, context, listening_port);
-        });
+    return AddStep([configure_http_server =
+                        std::forward<TConfigure>(configure_http_server)](
+                       Server &, httplib::Server &http_server,
+                       CppServer::Routing::RoutingService<TContext> &,
+                       TContext &context, const int listening_port) mutable {
+      configure_http_server(http_server, context, listening_port);
+    });
   }
 
   template <typename TConfigure>
@@ -377,8 +367,8 @@ public:
     return AddStep(
         [configure_service = std::forward<TConfigure>(configure_service)](
             Server &, httplib::Server &,
-          CppServer::Routing::RoutingService<TContext> &service, TContext &context,
-            const int listening_port) mutable {
+            CppServer::Routing::RoutingService<TContext> &service,
+            TContext &context, const int listening_port) mutable {
           configure_service(service, context, listening_port);
         });
   }
@@ -434,14 +424,14 @@ private:
 class Compositor {
 public:
   template <typename TServiceTag>
-  ComposedService<typename TServiceTag::Context> &Compose(
-      PortRange port_range) {
+  ComposedService<typename TServiceTag::Context> &
+  Compose(PortRange port_range) {
     return Compose<TServiceTag>(DEFAULT_SERVICE_INSTANCE_ID, port_range);
   }
 
   template <typename TServiceTag>
-  ComposedService<typename TServiceTag::Context> &Compose(
-      const ServiceInstanceId instance_id, PortRange port_range) {
+  ComposedService<typename TServiceTag::Context> &
+  Compose(const ServiceInstanceId instance_id, PortRange port_range) {
     using TContext = typename TServiceTag::Context;
     return Compose<TServiceTag>(
         instance_id, port_range,
@@ -449,16 +439,17 @@ public:
   }
 
   template <typename TServiceTag, typename TContextFactory>
-  ComposedService<typename TServiceTag::Context> &Compose(
-      const ServiceInstanceId instance_id, PortRange port_range,
-      TContextFactory &&context_factory) {
+  ComposedService<typename TServiceTag::Context> &
+  Compose(const ServiceInstanceId instance_id, PortRange port_range,
+          TContextFactory &&context_factory) {
     using TContext = typename TServiceTag::Context;
-    const ServiceTagId service_tag_id = Detail::ResolveServiceTagId<TServiceTag>();
+    const ServiceTagId service_tag_id =
+        Detail::ResolveServiceTagId<TServiceTag>();
     const ServiceKey service_key =
-      Detail::ComposeServiceKey(service_tag_id, instance_id);
+        Detail::ComposeServiceKey(service_tag_id, instance_id);
     auto service = std::make_unique<ComposedService<TContext>>(
-      service_key, service_tag_id, instance_id,
-      Detail::ComposeServiceName<TServiceTag>(instance_id), port_range,
+        service_key, service_tag_id, instance_id,
+        Detail::ComposeServiceName<TServiceTag>(instance_id), port_range,
         typename ComposedService<TContext>::ContextFactory(
             std::forward<TContextFactory>(context_factory)));
     auto *service_ptr = service.get();
@@ -475,12 +466,11 @@ public:
   }
 
   template <typename TServiceTag>
-  ComposedService<typename TServiceTag::Context> *Find(
-      const ServiceInstanceId instance_id = DEFAULT_SERVICE_INSTANCE_ID) {
+  ComposedService<typename TServiceTag::Context> *
+  Find(const ServiceInstanceId instance_id = DEFAULT_SERVICE_INSTANCE_ID) {
     using TContext = typename TServiceTag::Context;
-    const auto existing =
-        service_index_map_.find(Detail::ComposeServiceKey<TServiceTag>(
-            instance_id));
+    const auto existing = service_index_map_.find(
+        Detail::ComposeServiceKey<TServiceTag>(instance_id));
     if (existing == service_index_map_.end()) {
       return nullptr;
     }
@@ -493,9 +483,8 @@ public:
   const ComposedService<typename TServiceTag::Context> *Find(
       const ServiceInstanceId instance_id = DEFAULT_SERVICE_INSTANCE_ID) const {
     using TContext = typename TServiceTag::Context;
-    const auto existing =
-        service_index_map_.find(Detail::ComposeServiceKey<TServiceTag>(
-            instance_id));
+    const auto existing = service_index_map_.find(
+        Detail::ComposeServiceKey<TServiceTag>(instance_id));
     if (existing == service_index_map_.end()) {
       return nullptr;
     }

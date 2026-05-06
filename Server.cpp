@@ -10,9 +10,7 @@ void Server::ResetRuntimeState() {
   compositor_.ResetRuntimes();
 }
 
-void Server::PrepareServiceRuntimes() {
-  compositor_.Prepare(*this, context_);
-}
+void Server::PrepareServiceRuntimes() { compositor_.Prepare(*this, context_); }
 
 void Server::BindServiceRuntimes() {
   compositor_.Bind(context_.options.host, bound_ports_);
@@ -21,8 +19,7 @@ void Server::BindServiceRuntimes() {
 
 void Server::PrintRuntimeSummary() const {
   std::cout << "Listener threads: " << bound_ports_.size()
-            << ", worker threads: " << context_.options.worker_threads
-            << "\n";
+            << ", worker threads: " << context_.options.worker_threads << "\n";
   std::cout << "Listening ports:";
   for (const int port : bound_ports_) {
     std::cout << ' ' << port;
@@ -45,7 +42,5 @@ void Server::Start() {
   compositor_.Join();
 }
 
-void Server::Shutdown() {
-  compositor_.Stop();
-}
+void Server::Shutdown() { compositor_.Stop(); }
 } // namespace CppServer::Core

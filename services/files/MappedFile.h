@@ -34,10 +34,10 @@ public:
     close();
 
 #ifdef _WIN32
-    const HANDLE file_handle = CreateFileW(
-        path.c_str(), GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    const HANDLE file_handle =
+        CreateFileW(path.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file_handle == INVALID_HANDLE_VALUE) {
       return false;
     }
@@ -92,8 +92,7 @@ public:
       return true;
     }
 
-    data_ =
-        ::mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, file_descriptor_, 0);
+    data_ = ::mmap(nullptr, size_, PROT_READ, MAP_PRIVATE, file_descriptor_, 0);
     if (data_ == MAP_FAILED) {
       data_ = nullptr;
       close();

@@ -68,15 +68,18 @@ public:
           const auto host_cpu_usage_percent = ReadHostCpuUsagePercent();
           const auto host_memory_usage = ReadHostMemoryUsage();
 
-          const auto now_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                        SystemClock::now().time_since_epoch())
-                                        .count();
+          const auto now_epoch_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  SystemClock::now().time_since_epoch())
+                  .count();
 
-          long long rtt_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 Clock::now() - handler_started)
-                                 .count();
+          long long rtt_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  Clock::now() - handler_started)
+                  .count();
           std::string rtt_source = "server_processing_fallback";
-          if (const auto client_sent_ms = ParseEpochMsHeader(req, "x-client-send-ms")) {
+          if (const auto client_sent_ms =
+                  ParseEpochMsHeader(req, "x-client-send-ms")) {
             rtt_ms = std::max<long long>(0, now_epoch_ms - *client_sent_ms);
             rtt_source = "x-client-send-ms";
           }
@@ -87,28 +90,29 @@ public:
               {"host_cpu_usage_percent",
                host_cpu_usage_percent
                    ? Json(ToDisplayPercent(*host_cpu_usage_percent))
-                                      : Json(nullptr)},
+                   : Json(nullptr)},
               {"host_memory_usage_percent",
                host_memory_usage
                    ? Json(ToDisplayPercent(host_memory_usage->usage_percent))
-                                 : Json(nullptr)},
+                   : Json(nullptr)},
               {"host_memory_usage_share",
                host_memory_usage ? Json(FormatMemoryShare(*host_memory_usage))
                                  : Json(nullptr)},
               {"host_memory_usage",
-               host_memory_usage ? Json(FormatMemoryUsageReport(*host_memory_usage))
-                                 : Json(nullptr)},
+               host_memory_usage
+                   ? Json(FormatMemoryUsageReport(*host_memory_usage))
+                   : Json(nullptr)},
               {"rtt_ms", rtt_ms},
               {"rtt_source", std::move(rtt_source)},
           };
         },
-        httplib::API::RouteOptions{.parameters =
-                                       {httplib::API::Parameter<long long>(
-                                            httplib::API::ParameterLocation::Header,
-                                            "x-client-send-ms",
-                                            "Optional client send timestamp in Unix epoch milliseconds. When provided, RTT is computed as server_now - x-client-send-ms.",
-                                            false,
-                                            httplib::API::Json(1710000000000LL))}});
+        httplib::API::RouteOptions{
+            .parameters = {httplib::API::Parameter<long long>(
+                httplib::API::ParameterLocation::Header, "x-client-send-ms",
+                "Optional client send timestamp in Unix epoch milliseconds. "
+                "When provided, RTT is computed as server_now - "
+                "x-client-send-ms.",
+                false, httplib::API::Json(1710000000000LL))}});
   }
 
 private:
@@ -130,9 +134,8 @@ private:
     }
 
     const unsigned long long used_bytes = total_bytes - available_bytes;
-    const double usage_percent =
-        (static_cast<double>(used_bytes) * 100.0) /
-        static_cast<double>(total_bytes);
+    const double usage_percent = (static_cast<double>(used_bytes) * 100.0) /
+                                 static_cast<double>(total_bytes);
 
     return MemoryUsage{std::clamp(usage_percent, 0.0, 100.0), used_bytes,
                        total_bytes};
@@ -145,9 +148,9 @@ private:
     };
 
     const unsigned long long used_gib = to_rounded_gib(memory_usage.used_bytes);
-    const unsigned long long total_gib = to_rounded_gib(memory_usage.total_bytes);
-    return std::to_string(used_gib) + "GB/" + std::to_string(total_gib) +
-           "GB";
+    const unsigned long long total_gib =
+        to_rounded_gib(memory_usage.total_bytes);
+    return std::to_string(used_gib) + "GB/" + std::to_string(total_gib) + "GB";
   }
 
   static std::string FormatMemoryUsageReport(const MemoryUsage &memory_usage) {
@@ -197,8 +200,8 @@ private:
     return std::clamp(usage, 0.0, 100.0);
   }
 
-  static std::optional<long long> ParseEpochMsHeader(const httplib::Request &req,
-                                                     const char *header_name) {
+  static std::optional<long long>
+  ParseEpochMsHeader(const httplib::Request &req, const char *header_name) {
     if (!req.has_header(header_name)) {
       return std::nullopt;
     }
@@ -238,7 +241,7 @@ private:
     const unsigned long long total = to_u64(kernel_time) + to_u64(user_time);
 
     return ComputeUsageFromCounters(idle, total);
-  #elif defined(__linux__)
+#elif defined(__linux__)
     // Linux: read cumulative CPU counters from /proc/stat.
     FILE *stat_file = std::fopen("/proc/stat", "r");
     if (stat_file == nullptr) {
@@ -254,10 +257,9 @@ private:
     unsigned long long irq = 0;
     unsigned long long softirq = 0;
     unsigned long long steal = 0;
-    const int scanned = std::fscanf(stat_file,
-                    "%15s %llu %llu %llu %llu %llu %llu %llu %llu",
-                    label, &user, &nice, &system, &idle_ticks,
-                    &iowait, &irq, &softirq, &steal);
+    const int scanned = std::fscanf(
+        stat_file, "%15s %llu %llu %llu %llu %llu %llu %llu %llu", label, &user,
+        &nice, &system, &idle_ticks, &iowait, &irq, &softirq, &steal);
     std::fclose(stat_file);
     if (scanned < 5 || std::string(label) != "cpu") {
       return std::nullopt;
@@ -265,27 +267,27 @@ private:
 
     const unsigned long long idle = idle_ticks + iowait;
     const unsigned long long total =
-      user + nice + system + idle_ticks + iowait + irq + softirq + steal;
+        user + nice + system + idle_ticks + iowait + irq + softirq + steal;
     return ComputeUsageFromCounters(idle, total);
-  #elif defined(__APPLE__)
+#elif defined(__APPLE__)
     // macOS: use Mach host statistics CPU ticks.
     host_cpu_load_info_data_t cpu_load{};
     mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
     const kern_return_t result =
-      host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO,
-              reinterpret_cast<host_info_t>(&cpu_load), &count);
+        host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO,
+                        reinterpret_cast<host_info_t>(&cpu_load), &count);
     if (result != KERN_SUCCESS) {
       return std::nullopt;
     }
 
     const unsigned long long user =
-      static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_USER]);
+        static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_USER]);
     const unsigned long long system =
-      static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_SYSTEM]);
+        static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_SYSTEM]);
     const unsigned long long idle =
-      static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_IDLE]);
+        static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_IDLE]);
     const unsigned long long nice =
-      static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_NICE]);
+        static_cast<unsigned long long>(cpu_load.cpu_ticks[CPU_STATE_NICE]);
 
     return ComputeUsageFromCounters(idle, user + system + idle + nice);
 #else
@@ -304,7 +306,7 @@ private:
 
     return BuildMemoryUsage(memory_status.ullTotalPhys,
                             memory_status.ullAvailPhys);
-  #elif defined(__linux__)
+#elif defined(__linux__)
     // Linux: read MemTotal and MemAvailable from /proc/meminfo.
     FILE *meminfo_file = std::fopen("/proc/meminfo", "r");
     if (meminfo_file == nullptr) {
@@ -332,7 +334,7 @@ private:
     }
 
     return BuildMemoryUsage(total_kib * 1024ULL, available_kib * 1024ULL);
-  #elif defined(__APPLE__)
+#elif defined(__APPLE__)
     // macOS: total from sysctl, available approximated from VM page stats.
     std::uint64_t total_bytes = 0;
     std::size_t total_size = sizeof(total_bytes);
@@ -370,6 +372,5 @@ private:
     return std::nullopt;
 #endif
   }
-
 };
-} // namespace CppServer::Routers::Status
+} // namespace CppServer::Routers

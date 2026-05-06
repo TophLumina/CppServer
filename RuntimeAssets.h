@@ -25,7 +25,8 @@ inline std::vector<std::filesystem::path> SearchRoots() {
   std::vector<std::filesystem::path> roots;
   roots.push_back(current_directory);
 
-  const std::filesystem::path parent_directory = current_directory.parent_path();
+  const std::filesystem::path parent_directory =
+      current_directory.parent_path();
   if (!parent_directory.empty() && parent_directory != current_directory) {
     roots.push_back(parent_directory);
   }
@@ -52,7 +53,8 @@ inline std::optional<std::filesystem::path>
 FindExistingPath(const std::filesystem::path &configured_path,
                  const PathKind kind = PathKind::Any) {
   if (configured_path.is_absolute()) {
-    const std::filesystem::path normalized_path = NormalizePath(configured_path);
+    const std::filesystem::path normalized_path =
+        NormalizePath(configured_path);
     if (MatchesPathKind(normalized_path, kind)) {
       return normalized_path;
     }

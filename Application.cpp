@@ -34,7 +34,7 @@ void ConfigureApplication(CppServer::Core::Server &server,
   compositor
       .Compose<ApiServiceTag>(
           CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
-        ResolveServicePortRange<ApiServiceContext>(options, 0))
+          ResolveServicePortRange<ApiServiceContext>(options, 0))
       .AddRouter<CppServer::Routers::DefaultRouter<ApiServiceContext>>()
       .AddRouter<CppServer::Routers::StatusRouter<ApiServiceContext>>()
       .AddRouter<CppServer::Routers::SampleRouter<ApiServiceContext>>()

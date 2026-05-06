@@ -33,7 +33,7 @@ inline constexpr const char *DEFAULT_ROUTER_NAME = "default";
 inline constexpr std::size_t METADATA_UPDATE_RESPONSE_INTERVAL = 1024;
 /// 元信息最小更新时间间隔。
 inline constexpr auto METADATA_UPDATE_MIN_INTERVAL =
-  std::chrono::milliseconds(2000);
+    std::chrono::milliseconds(2000);
 
 /// 路由响应缓存策略：按端点声明，空策略（std::nullopt）表示不缓存。
 struct CachePolicy {
@@ -159,9 +159,7 @@ struct ApiTypeTraits<std::vector<TValue, TAllocator>, void> {
 template <typename TAllocator>
 struct ApiTypeTraits<std::vector<std::uint8_t, TAllocator>, void> {
   static std::string CppType() { return "std::vector<std::uint8_t>"; }
-  static Json Schema() {
-    return {{"type", "string"}, {"format", "binary"}};
-  }
+  static Json Schema() { return {{"type", "string"}, {"format", "binary"}}; }
 
   template <typename TValue> static Json ToJson(TValue &&value) {
     return Json(std::forward<TValue>(value));
@@ -171,9 +169,7 @@ struct ApiTypeTraits<std::vector<std::uint8_t, TAllocator>, void> {
 template <typename TAllocator>
 struct ApiTypeTraits<std::vector<std::byte, TAllocator>, void> {
   static std::string CppType() { return "std::vector<std::byte>"; }
-  static Json Schema() {
-    return {{"type", "string"}, {"format", "binary"}};
-  }
+  static Json Schema() { return {{"type", "string"}, {"format", "binary"}}; }
 
   template <typename TValue> static Json ToJson(TValue &&value) {
     return Json(std::forward<TValue>(value));
@@ -183,9 +179,7 @@ struct ApiTypeTraits<std::vector<std::byte, TAllocator>, void> {
 template <typename TAllocator>
 struct ApiTypeTraits<std::vector<char, TAllocator>, void> {
   static std::string CppType() { return "std::vector<char>"; }
-  static Json Schema() {
-    return {{"type", "string"}, {"format", "binary"}};
-  }
+  static Json Schema() { return {{"type", "string"}, {"format", "binary"}}; }
 
   template <typename TValue> static Json ToJson(TValue &&value) {
     return Json(std::forward<TValue>(value));
@@ -264,15 +258,19 @@ inline std::string ToOpenApiParameterLocation(ParameterLocation location) {
 }
 
 template <typename TValue>
-inline ParameterRecord Parameter(
-    ParameterLocation location, std::string name, std::string description = "",
-    bool required = false, std::optional<Json> example = std::nullopt) {
+inline ParameterRecord Parameter(ParameterLocation location, std::string name,
+                                 std::string description = "",
+                                 bool required = false,
+                                 std::optional<Json> example = std::nullopt) {
   if (location == ParameterLocation::Path) {
     required = true;
   }
 
-  return ParameterRecord{std::move(name), location, std::move(description),
-                         required, JsonSchemaFromType<std::decay_t<TValue>>(),
+  return ParameterRecord{std::move(name),
+                         location,
+                         std::move(description),
+                         required,
+                         JsonSchemaFromType<std::decay_t<TValue>>(),
                          std::move(example)};
 }
 
@@ -352,9 +350,9 @@ inline OpenApiPathInfo DescribeOpenApiPath(const std::string &path) {
   return info;
 }
 
-inline std::vector<ParameterRecord>
-BuildDocumentedParameters(const RouteRecord &route,
-                          const std::vector<std::string> &path_parameter_names) {
+inline std::vector<ParameterRecord> BuildDocumentedParameters(
+    const RouteRecord &route,
+    const std::vector<std::string> &path_parameter_names) {
   std::vector<ParameterRecord> parameters = route.parameters;
   for (auto &parameter : parameters) {
     if (parameter.location == ParameterLocation::Path) {
@@ -367,12 +365,13 @@ BuildDocumentedParameters(const RouteRecord &route,
 
   for (const auto &name : path_parameter_names) {
     const auto existing = std::find_if(
-        parameters.begin(), parameters.end(), [&name](const ParameterRecord &p) {
+        parameters.begin(), parameters.end(),
+        [&name](const ParameterRecord &p) {
           return p.location == ParameterLocation::Path && p.name == name;
         });
     if (existing == parameters.end()) {
-      parameters.push_back(Parameter<std::string>(ParameterLocation::Path,
-                                                  name));
+      parameters.push_back(
+          Parameter<std::string>(ParameterLocation::Path, name));
     }
   }
 
@@ -658,9 +657,8 @@ private:
 /// Router：封装 httplib 注册流程并自动采集返回类型与文档元数据。
 template <typename TContext> class Router {
 public:
-  using CachePolicyResolver =
-      std::function<std::optional<CachePolicy>(const std::string &,
-                                               const std::string &)>;
+  using CachePolicyResolver = std::function<std::optional<CachePolicy>(
+      const std::string &, const std::string &)>;
 
   /// 可通过 router_name 控制该 Router 注册出的 OpenAPI tag 名称。
   Router(httplib::Server &server, TContext &context,
@@ -705,7 +703,7 @@ public:
   template <typename THandler>
   void Post(const std::string &path, std::string summary,
             std::string description, std::string response_description,
-          THandler &&handler, RouteOptions options = {}) {
+            THandler &&handler, RouteOptions options = {}) {
     Route("POST", path, std::move(summary), std::move(description),
           std::move(response_description), std::forward<THandler>(handler),
           std::move(options));
@@ -723,7 +721,7 @@ public:
   template <typename THandler>
   void Patch(const std::string &path, std::string summary,
              std::string description, std::string response_description,
-           THandler &&handler, RouteOptions options = {}) {
+             THandler &&handler, RouteOptions options = {}) {
     Route("PATCH", path, std::move(summary), std::move(description),
           std::move(response_description), std::forward<THandler>(handler),
           std::move(options));
@@ -732,7 +730,7 @@ public:
   template <typename THandler>
   void Delete(const std::string &path, std::string summary,
               std::string description, std::string response_description,
-            THandler &&handler, RouteOptions options = {}) {
+              THandler &&handler, RouteOptions options = {}) {
     Route("DELETE", path, std::move(summary), std::move(description),
           std::move(response_description), std::forward<THandler>(handler),
           std::move(options));
@@ -751,41 +749,40 @@ public:
 
     const std::string entry_url =
         BuildMountedEntryUrl(mount_path, std::move(entry_file));
-    server_.Get(mount_path, [entry_url](const httplib::Request &,
-                                        httplib::Response &res) {
-      res.set_redirect(entry_url.c_str());
-    });
-    server_.Get(mount_path + "/", [entry_url](const httplib::Request &,
-                                               httplib::Response &res) {
-      res.set_redirect(entry_url.c_str());
-    });
+    server_.Get(mount_path,
+                [entry_url](const httplib::Request &, httplib::Response &res) {
+                  res.set_redirect(entry_url.c_str());
+                });
+    server_.Get(mount_path + "/",
+                [entry_url](const httplib::Request &, httplib::Response &res) {
+                  res.set_redirect(entry_url.c_str());
+                });
     return true;
   }
 
-  bool MountFile(const std::string &mount_path,
-                 const std::string &file_path) {
+  bool MountFile(const std::string &mount_path, const std::string &file_path) {
     if (mount_path.empty() || mount_path.front() != '/') {
       return false;
     }
 
     server_.Get(mount_path, [file_path](const httplib::Request &,
                                         httplib::Response &res) {
-      auto mapped_file = std::make_shared<httplib::detail::mmap>(
-          file_path.c_str());
+      auto mapped_file =
+          std::make_shared<httplib::detail::mmap>(file_path.c_str());
       if (!mapped_file->is_open()) {
         res.status = 404;
         return;
       }
 
-      res.set_content_provider(
-          mapped_file->size(),
-          httplib::detail::find_content_type(file_path, {},
-                                             "application/octet-stream"),
-          [mapped_file](size_t offset, size_t length,
-                        httplib::DataSink &sink) -> bool {
-            sink.write(mapped_file->data() + offset, length);
-            return true;
-          });
+      res.set_content_provider(mapped_file->size(),
+                               httplib::detail::find_content_type(
+                                   file_path, {}, "application/octet-stream"),
+                               [mapped_file](size_t offset, size_t length,
+                                             httplib::DataSink &sink) -> bool {
+                                 sink.write(mapped_file->data() + offset,
+                                            length);
+                                 return true;
+                               });
     });
     return true;
   }
@@ -842,10 +839,10 @@ public:
           CppServer::RuntimeAssets::FindExistingPath(
               docs_html_path, CppServer::RuntimeAssets::PathKind::File)
               .value_or(CppServer::RuntimeAssets::ResolvePath(docs_html_path));
-      const std::string docs_dir = docs_asset_path.has_parent_path()
-                                       ? docs_asset_path.parent_path().string()
-                                       : CppServer::RuntimeAssets::ResolvePath(".")
-                                             .string();
+      const std::string docs_dir =
+          docs_asset_path.has_parent_path()
+              ? docs_asset_path.parent_path().string()
+              : CppServer::RuntimeAssets::ResolvePath(".").string();
       std::string docs_entry = docs_asset_path.filename().string();
       if (docs_entry.empty()) {
         docs_entry = "swagger.html";
@@ -968,11 +965,10 @@ private:
 
   static CachePolicy NormalizeCachePolicy(CachePolicy policy) {
     auto compact_fields = [](std::vector<std::string> &fields) {
-      fields.erase(std::remove_if(fields.begin(), fields.end(),
-                                  [](const std::string &item) {
-                                    return item.empty();
-                                  }),
-                   fields.end());
+      fields.erase(
+          std::remove_if(fields.begin(), fields.end(),
+                         [](const std::string &item) { return item.empty(); }),
+          fields.end());
     };
 
     compact_fields(policy.query_fields);
@@ -1058,7 +1054,8 @@ private:
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(cache_store.mutex);
 
-    for (auto it = cache_store.entries.begin(); it != cache_store.entries.end();) {
+    for (auto it = cache_store.entries.begin();
+         it != cache_store.entries.end();) {
       if (it->second.expires_at <= now) {
         it = cache_store.entries.erase(it);
       } else {
@@ -1069,8 +1066,8 @@ private:
     if (cache_store.entries.size() >= cache_policy.max_entries &&
         !cache_store.entries.empty()) {
       auto oldest_it = cache_store.entries.begin();
-      for (auto it = cache_store.entries.begin(); it != cache_store.entries.end();
-           ++it) {
+      for (auto it = cache_store.entries.begin();
+           it != cache_store.entries.end(); ++it) {
         if (it->second.last_access < oldest_it->second.last_access) {
           oldest_it = it;
         }
@@ -1174,11 +1171,10 @@ private:
         .description = std::move(description),
         .callback_result_type = result_type_name,
         .parameters = std::move(options.parameters),
-        .responses = {ResponseRecord{options.status, options.content_type,
-                                     result_type_name,
-                                     std::move(response_description),
-                                     JsonSchemaFromType<TResult>(),
-                                     Json::object()}},
+        .responses = {ResponseRecord{
+            options.status, options.content_type, result_type_name,
+            std::move(response_description), JsonSchemaFromType<TResult>(),
+            Json::object()}},
     };
     registry_->Declare(std::move(route));
 
@@ -1214,15 +1210,15 @@ private:
         }
       }
 
-      const auto maybe_update_metadata =
-          [&](const int status_code, const std::string &content_type,
-              Json body, const bool force_update = false) {
-            if (ShouldUpdateMetadataForRoute(route_key, force_update)) {
-              registry->UpdateLatestResponse(method_name, route_path,
-                                             status_code, content_type,
-                                             std::move(body));
-            }
-          };
+      const auto maybe_update_metadata = [&](const int status_code,
+                                             const std::string &content_type,
+                                             Json body,
+                                             const bool force_update = false) {
+        if (ShouldUpdateMetadataForRoute(route_key, force_update)) {
+          registry->UpdateLatestResponse(method_name, route_path, status_code,
+                                         content_type, std::move(body));
+        }
+      };
 
       const auto maybe_store_cache = [&](const CachedResponse &response) {
         if (cache_store == nullptr || !cache_policy.has_value() ||
@@ -1254,52 +1250,52 @@ private:
       };
 
       try {
-      using CapturedHandler = std::remove_reference_t<decltype(fn)>;
-      using CapturedResult = std::decay_t<decltype(InvokeHandler(
-          std::declval<CapturedHandler &>(),
-          std::declval<const httplib::Request &>(),
-          std::declval<TContext &>()))>;
+        using CapturedHandler = std::remove_reference_t<decltype(fn)>;
+        using CapturedResult = std::decay_t<decltype(InvokeHandler(
+            std::declval<CapturedHandler &>(),
+            std::declval<const httplib::Request &>(),
+            std::declval<TContext &>()))>;
 
-      CapturedResult value = InvokeHandler(fn, req, *ctx);
-      res.status = response_status;
-      if constexpr (std::is_same_v<CapturedResult, std::string>) {
-        write_text_response(std::move(value));
-        return;
-      } else if constexpr (std::is_same_v<CapturedResult, std::string_view>) {
-        write_text_response(std::string(value));
-        return;
-      } else if constexpr (std::is_same_v<CapturedResult, const char *> ||
-                           std::is_same_v<CapturedResult, char *>) {
-        write_text_response(value == nullptr ? std::string{}
-                                             : std::string(value));
-        return;
-      } else if constexpr (kIsByteVectorResult<CapturedResult>) {
-        const std::size_t payload_bytes =
-            value.size() * sizeof(typename CapturedResult::value_type);
-        std::string payload_bytes_text;
-        if (payload_bytes > 0) {
-          payload_bytes_text.assign(
-              reinterpret_cast<const char *>(value.data()), payload_bytes);
+        CapturedResult value = InvokeHandler(fn, req, *ctx);
+        res.status = response_status;
+        if constexpr (std::is_same_v<CapturedResult, std::string>) {
+          write_text_response(std::move(value));
+          return;
+        } else if constexpr (std::is_same_v<CapturedResult, std::string_view>) {
+          write_text_response(std::string(value));
+          return;
+        } else if constexpr (std::is_same_v<CapturedResult, const char *> ||
+                             std::is_same_v<CapturedResult, char *>) {
+          write_text_response(value == nullptr ? std::string{}
+                                               : std::string(value));
+          return;
+        } else if constexpr (kIsByteVectorResult<CapturedResult>) {
+          const std::size_t payload_bytes =
+              value.size() * sizeof(typename CapturedResult::value_type);
+          std::string payload_bytes_text;
+          if (payload_bytes > 0) {
+            payload_bytes_text.assign(
+                reinterpret_cast<const char *>(value.data()), payload_bytes);
+          }
+
+          CachedResponse response{response_status, response_content_type,
+                                  std::move(payload_bytes_text)};
+          res.set_content(response.body.data(), response.body.size(),
+                          response.content_type);
+          maybe_store_cache(response);
+          return;
         }
 
+        Json body = ToJson(std::move(value));
+        std::string serialized_body = body.dump();
         CachedResponse response{response_status, response_content_type,
-                                std::move(payload_bytes_text)};
+                                std::move(serialized_body)};
         res.set_content(response.body.data(), response.body.size(),
                         response.content_type);
         maybe_store_cache(response);
-        return;
-      }
 
-      Json body = ToJson(std::move(value));
-      std::string serialized_body = body.dump();
-      CachedResponse response{response_status, response_content_type,
-                              std::move(serialized_body)};
-      res.set_content(response.body.data(), response.body.size(),
-                      response.content_type);
-      maybe_store_cache(response);
-
-      maybe_update_metadata(response_status, response_content_type,
-                            std::move(body));
+        maybe_update_metadata(response_status, response_content_type,
+                              std::move(body));
       } catch (const std::exception &ex) {
         constexpr const char *error_content_type =
             "application/json; charset=utf-8";

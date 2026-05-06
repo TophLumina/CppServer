@@ -65,8 +65,8 @@ int AllocateLoopbackPort() {
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   address.sin_port = 0;
 
-  const int bind_result =
-      ::bind(sock, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
+  const int bind_result = ::bind(
+      sock, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
   if (bind_result != 0) {
 #ifdef _WIN32
     closesocket(sock);
@@ -134,7 +134,8 @@ std::optional<std::string> FetchBody(int port, const std::string &path,
   return result->body;
 }
 
-bool WaitForBody(int port, const std::string &path, const std::string &expected_body,
+bool WaitForBody(int port, const std::string &path,
+                 const std::string &expected_body,
                  std::chrono::milliseconds timeout) {
   return WaitUntil(timeout, [&] {
     const auto body = FetchBody(port, path, 200);
@@ -157,7 +158,8 @@ bool WaitForStatus(int port, const std::string &path, int expected_status,
 class ScopedFileServer {
 public:
   ScopedFileServer(std::filesystem::path mount_path, int port)
-      : mount_path_(std::move(mount_path)), port_(port), server_(MakeOptions()) {
+      : mount_path_(std::move(mount_path)), port_(port),
+        server_(MakeOptions()) {
     using FileServiceTag = CppServer::Core::ServiceTags::File;
     using FileContext = FileServiceTag::Context;
 
@@ -170,10 +172,11 @@ public:
             [mount_path = mount_path_.string()](int listening_port) {
               return std::make_unique<FileContext>(listening_port, mount_path);
             })
-        .ConfigureHttpServer([](httplib::Server &http_server,
-                                FileContext &file_context, int) {
-          CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
-        });
+        .ConfigureHttpServer(
+            [](httplib::Server &http_server, FileContext &file_context, int) {
+              CppServer::Services::Files::ConfigureRuntime(http_server,
+                                                           file_context);
+            });
 
     thread_ = std::thread([this] { server_.Start(); });
     if (!WaitUntilReady()) {
@@ -317,14 +320,16 @@ bool TestSymlinkEscapeIsRejected() {
 #ifdef _WIN32
     if (symlink_error.value() == ERROR_PRIVILEGE_NOT_HELD ||
         symlink_error.value() == ERROR_ACCESS_DENIED) {
-      std::cerr << "skipping symlink escape test: symlink privilege unavailable\n";
+      std::cerr
+          << "skipping symlink escape test: symlink privilege unavailable\n";
       std::filesystem::remove_all(test_root);
       return true;
     }
 #else
     if (symlink_error == std::errc::operation_not_permitted ||
         symlink_error == std::errc::permission_denied) {
-      std::cerr << "skipping symlink escape test: symlink privilege unavailable\n";
+      std::cerr
+          << "skipping symlink escape test: symlink privilege unavailable\n";
       std::filesystem::remove_all(test_root);
       return true;
     }

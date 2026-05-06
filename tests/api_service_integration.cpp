@@ -61,8 +61,8 @@ int AllocateLoopbackPort() {
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   address.sin_port = 0;
 
-  const int bind_result =
-      ::bind(sock, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
+  const int bind_result = ::bind(
+      sock, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
   if (bind_result != 0) {
 #ifdef _WIN32
     closesocket(sock);
@@ -145,7 +145,8 @@ public:
   int Port() const { return api_port_; }
 
 private:
-  static CppServer::Core::ServerOptions MakeOptions(int api_port, int file_port) {
+  static CppServer::Core::ServerOptions MakeOptions(int api_port,
+                                                    int file_port) {
     CppServer::Core::ServerOptions options;
     options.host = "127.0.0.1";
     options.worker_threads = 2;

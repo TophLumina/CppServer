@@ -14,8 +14,8 @@
 
 namespace CppServer::Services::Files {
 namespace Detail {
-inline std::string DetectDirectoryEntryFile(
-    const std::filesystem::path &directory_path) {
+inline std::string
+DetectDirectoryEntryFile(const std::filesystem::path &directory_path) {
   namespace fs = std::filesystem;
 
   for (const char *entry_name : {"index.html", "index.htm"}) {
@@ -59,7 +59,8 @@ ResolveMountedRequestPath(const std::string &resolved_mount_path,
   }
 
   error.clear();
-  const fs::path canonical_target_path = fs::weakly_canonical(target_path, error);
+  const fs::path canonical_target_path =
+      fs::weakly_canonical(target_path, error);
   if (error) {
     return std::nullopt;
   }
@@ -74,7 +75,8 @@ ResolveMountedRequestPath(const std::string &resolved_mount_path,
     }
 
     for (std::size_t index = 0; index < left_value.size(); ++index) {
-      if (std::towlower(left_value[index]) != std::towlower(right_value[index])) {
+      if (std::towlower(left_value[index]) !=
+          std::towlower(right_value[index])) {
         return false;
       }
     }
@@ -114,13 +116,12 @@ inline bool ServeStaticFile(const std::filesystem::path &file_path,
     return true;
   }
 
-  res.set_content_provider(
-      mapped_file->size(), content_type,
-      [mapped_file](size_t offset, size_t length,
-                    httplib::DataSink &sink) -> bool {
-        sink.write(mapped_file->data() + offset, length);
-        return true;
-      });
+  res.set_content_provider(mapped_file->size(), content_type,
+                           [mapped_file](size_t offset, size_t length,
+                                         httplib::DataSink &sink) -> bool {
+                             sink.write(mapped_file->data() + offset, length);
+                             return true;
+                           });
   return true;
 }
 
@@ -160,7 +161,8 @@ inline bool TryServeMountedRequest(const httplib::Request &req,
   return false;
 }
 
-inline std::shared_ptr<MountPathWatcher> EnsureMountWatcher(Context &file_context) {
+inline std::shared_ptr<MountPathWatcher>
+EnsureMountWatcher(Context &file_context) {
   if (file_context.mount_watcher != nullptr) {
     return file_context.mount_watcher;
   }
@@ -170,8 +172,8 @@ inline std::shared_ptr<MountPathWatcher> EnsureMountWatcher(Context &file_contex
   return file_context.mount_watcher;
 }
 
-inline std::shared_ptr<MappedFileCache> EnsureMappedFileCache(
-    Context &file_context) {
+inline std::shared_ptr<MappedFileCache>
+EnsureMappedFileCache(Context &file_context) {
   if (file_context.mapped_file_cache != nullptr) {
     return file_context.mapped_file_cache;
   }
@@ -202,7 +204,7 @@ inline void ConfigureRuntime(httplib::Server &server, Context &file_context) {
         }
 
         if (Detail::TryServeMountedRequest(req, res, *mapped_file_cache,
-                                          resolved_mount_path)) {
+                                           resolved_mount_path)) {
           return httplib::Server::HandlerResponse::Handled;
         }
         return httplib::Server::HandlerResponse::Unhandled;

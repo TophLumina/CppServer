@@ -16,7 +16,8 @@ public:
         "This is the default router. You can add endpoints here or create "
         "additional routers for better organization.",
         "Confirmation message", [](const httplib::Request &) { return "OK"; },
-        httplib::API::RouteOptions{.content_type = "text/plain; charset=utf-8"});
+        httplib::API::RouteOptions{.content_type =
+                                       "text/plain; charset=utf-8"});
   }
 };
 } // namespace CppServer::Routers

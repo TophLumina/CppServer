@@ -52,16 +52,17 @@ public:
     return static_cast<TRouter &>(*router_vector_.back());
   }
 
-  void RegisterSwaggerUI(
-      const std::string &title = "CppServer API",
-      const std::string &version = "1.0.0",
-      const std::string &description =
-          "Auto-generated routes and response metadata docs",
-      const std::string &docs_path = "/docs",
-      const std::string &openapi_path = "/docs/openapi.json",
-      const std::string &swagger_ui_endpoint = "",
-      const std::string &docs_html_path = "docs/swagger.html") {
-    httplib::API::Router<TContext> docs_router(server_, context_, api_registry_);
+  void
+  RegisterSwaggerUI(const std::string &title = "CppServer API",
+                    const std::string &version = "1.0.0",
+                    const std::string &description =
+                        "Auto-generated routes and response metadata docs",
+                    const std::string &docs_path = "/docs",
+                    const std::string &openapi_path = "/docs/openapi.json",
+                    const std::string &swagger_ui_endpoint = "",
+                    const std::string &docs_html_path = "docs/swagger.html") {
+    httplib::API::Router<TContext> docs_router(server_, context_,
+                                               api_registry_);
     docs_router.RegisterSwaggerUI(title, version, description, docs_path,
                                   openapi_path, swagger_ui_endpoint,
                                   docs_html_path);
@@ -74,8 +75,7 @@ public:
     return router.MountDirectory(mount_path, directory_path, entry_file);
   }
 
-  bool MountFile(const std::string &mount_path,
-                 const std::string &file_path) {
+  bool MountFile(const std::string &mount_path, const std::string &file_path) {
     httplib::API::Router<TContext> router(server_, context_, api_registry_);
     return router.MountFile(mount_path, file_path);
   }
