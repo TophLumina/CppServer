@@ -1,143 +1,313 @@
-# Minimal C++ Server (Docker)
+# CppServer
 
-A lightweight C++ HTTP server built with `cpp-httplib` and `nlohmann/json`.
-一个基于 `cpp-httplib` 和 `nlohmann/json` 的轻量 C++ HTTP 服务。
+## 中文
 
-The current version tries to listen on the following ports:
-当前版本会尝试监听以下端口：
+### 1. 项目介绍
 
-- `8080`
-- `8081`
+这是一个基于 `cpp-httplib`、`nlohmann/json` 和自定义线程池适配的轻量级 C++ HTTP 服务骨架。当前默认提供两个 service：
 
-If binding a preferred port fails, the process aborts immediately.
-如果某个首选端口绑定失败，进程会立刻中止（abort）。
+- `api`：`/`、`/status`、`/sample/*`、`/docs`
+- `file`：静态文件挂载，默认服务 `mount/`
 
-## 1) Build image / 构建镜像
+核心结构：
+
+- `Application::ConfigureApplication(...)`：应用装配入口
+- `Server`：生命周期外壳
+- `Compositor`：service 蓝图与 runtime 编排
+- `RoutingService<TContext>` / `RouterModule<TContext>`：路由层抽象
+
+功能特点：
+
+- service 蓝图和 runtime 实例分离，便于理解“如何装配”和“如何运行”
+- 使用 `ServiceTag + instanceId` 标识 service，避免字符串式误用
+- 文件 service 支持“启动时挂载 + 运行期变化感知”
+- API 路由可自动生成 OpenAPI 与 Swagger UI
+- 请求处理接入线程池，适合轻量并发服务
+
+### 2. 如何构建、部署、测试
+
+本地构建：
+
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+本地运行：
+
+```powershell
+.\build\server.exe
+```
+
+或：
+
+```powershell
+Set-Location build
+.\server.exe
+```
+
+Docker：
 
 ```powershell
 docker build -t cpp-server .
+docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 ```
 
-## 2) Run container / 运行容器
-
-Map all 2 ports to the host to make every listener reachable.
-建议将 2 个端口都映射到主机，确保所有监听器都可访问。
+测试：
 
 ```powershell
-docker run -d --name cpp-server `
-	-p 8080:8080 `
-	-p 8081:8081 `
-	cpp-server
-```
-
-## 3) Test endpoints / 测试接口
-
-You can use any bound port (example below uses `8080`).
-你可以使用任一已绑定端口（下面示例使用 `8080`）。
-
-```powershell
+ctest --test-dir build --output-on-failure
+curl http://127.0.0.1:8080/
 curl http://127.0.0.1:8080/status
-curl http://127.0.0.1:8080/sample/asciiart
 curl http://127.0.0.1:8080/docs
-curl http://127.0.0.1:8080/docs/openapi.json
+curl http://127.0.0.1:8081/hello.txt
 ```
 
-## Endpoint behavior / 接口行为
-
-- `/status` returns runtime health JSON: `alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_memory_usage_percent`, `host_memory_usage_share`, `host_memory_usage`, `rtt_ms`, `rtt_source`
-- `/status` 返回运行时健康 JSON：`alive`, `uptime_seconds`, `host_cpu_usage_percent`, `host_memory_usage_percent`, `host_memory_usage_share`, `host_memory_usage`, `rtt_ms`, `rtt_source`
-- `/sample/asciiart` returns plain text ASCII art
-- `/sample/asciiart` 返回纯文本 ASCII 字符画
-- `/docs` serves Swagger UI
-- `/docs` 提供 Swagger UI
-- `/docs/openapi.json` returns OpenAPI JSON
-- `/docs/openapi.json` 返回 OpenAPI JSON
-
-## Cache policy / 缓存策略
-
-- Cache policy is declared in each router via `ResolveCachePolicy(method, path)`.
-- 缓存策略通过各路由中的 `ResolveCachePolicy(method, path)` 声明。
-- Return `std::nullopt` to disable cache for that endpoint.
-- 返回 `std::nullopt` 表示该端点不启用缓存。
-- API resolves policy once at route registration time and applies it in endpoint runtime handlers.
-- API 在路由注册阶段解析策略，并在端点运行时处理逻辑中应用。
-
-Current policies in this project / 当前项目策略：
-
-- `GET /status`: enabled, TTL=`100ms`, `max_entries=16`
-- `GET /status`：启用缓存，TTL=`100ms`，`max_entries=16`
-- `GET /sample/asciiart`: disabled (`std::nullopt`)
-- `GET /sample/asciiart`：不启用缓存（`std::nullopt`）
-
-## Register a new router / 注册新路由
-
-Use `SampleRouter` as the reference implementation.
-可参考 `SampleRouter` 作为实现模板。
-
-1. Create a new router class in `services/` that derives from `CppServer::Routing::RouterModule<TContext>`.
-2. 在 `services/` 下新增一个继承 `CppServer::Routing::RouterModule<TContext>` 的路由类。
-3. Implement `RouterName()` and `Register(...)` in that class.
-4. 在该类中实现 `RouterName()` 与 `Register(...)`。
-5. (Optional) implement `ResolveCachePolicy(method, path)` to configure endpoint-level caching.
-6. （可选）实现 `ResolveCachePolicy(method, path)` 以配置端点级缓存策略。
-7. Include the router header in `Application.cpp`, where default service composition is assembled.
-8. 在 `Application.cpp` 中包含该路由头文件，并在默认 service 组合装配逻辑中注册它。
-9. Add one line in startup wiring:
-10. 在启动装配代码中添加一行：
+端口覆盖示例：
 
 ```cpp
-apiservice.RegisterRouter<CppServer::Routers::YourRouter<CppServer::Services::SimpleApi::Context>>();
+CppServer::Core::ServerOptions options;
+options.service_port_overrides = {
+    {9000, 1},
+    {9001, 1},
+};
+
+CppServer::Core::Server server(options);
+CppServer::Application::ConfigureApplication(server, options);
+server.Start();
 ```
 
-Reference:
-参考：
+### 3. 二次开发指南和样例
 
-- `services/simpleapi/SampleRouter.h` (`SampleRouter`)
-- `Application.cpp` (default service composition with `compositor.Compose<TServiceTag>(instance_id, ...)`)
-- `ServiceTags.h` (formal extension point for default and custom service tag definitions)
+在已有 `api` service 下加新路由：
 
-## Customize bootstrap / 自定义启动注入
+1. 新建一个继承 `RouterModule<TContext>` 的 router
+2. 在 `Application.cpp` 中通过 `.AddRouter<...>()` 注册
+3. 重新构建后检查 `/docs`
 
-The default startup wiring now lives in `Application.cpp`, so secondary development starts from `Application` and `main.cpp` stays as a thin entrypoint.
-当前默认启动装配已移入 `Application.cpp`，因此二次开发从 `Application` 入手，`main.cpp` 只保留薄启动入口。
+最小示例：
 
 ```cpp
-#include "ServiceTags.h"
-#include "services/simpleapi/YourRouter.h"
-
-void CppServer::Application::ConfigureApplication(
-                         CppServer::Core::Server &server,
-                         const CppServer::Core::ServerOptions &options) {
-  auto &compositor = server.Composition();
-  compositor.Clear();
-
-  compositor
-    .Compose<CppServer::Core::ServiceTags::Api>(
-      CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID, {8080, 1})
-    .AddRouter<CppServer::Routers::YourRouter<
-      CppServer::Services::SimpleApi::Context>>()
-    .AddSwaggerUI();
-}
+template <typename TContext>
+class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  std::string RouterName() const override { return "TIME"; }
+  void Register(httplib::API::Router<TContext> &router) override {
+    router.Get("/time", [](const httplib::Request &) { return "ok"; });
+  }
+};
 ```
 
-`TServiceTag` must provide `Context`, a 16-bit `ID`, and `DisplayName`.
-`TServiceTag` 需要提供 `Context`、16 位 `ID` 和 `DisplayName`。
+```cpp
+.AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+```
 
-Put reusable default or custom tags in `ServiceTags.h` or a sibling custom tag header.
-可复用的默认或自定义 tag 应放在 `ServiceTags.h` 或并列的自定义 tag 头文件中。
+添加新 service：
 
-Available injection points:
-可用注入点：
+1. 定义新的 `Context`
+2. 定义新的 `ServiceTag`
+3. 编写 router
+4. 在 `Application.cpp` 中 `Compose<NewServiceTag>(...)`
 
-- `Application::ConfigureApplication(...)` as the central application customization entrypoint
-- `Server::Composition().Compose<TServiceTag>(instance_id, ...)` to replace or add a composed service inside `Application.cpp`
-- `Server::Composition().Find<TServiceTag>(instance_id)` to mutate an existing composed service inside `Application.cpp`
+最小示例：
 
-## Expose to external network / 对外网络暴露
+```cpp
+struct Admin {
+  using Context = CppServer::Services::Admin::Context;
+  static constexpr std::uint16_t ID = 10;
+  inline static constexpr std::string_view DisplayName = "admin";
+};
+```
 
-- The server listens on `0.0.0.0` inside the container.
-- 服务在容器内监听 `0.0.0.0`。
-- In production, open only required ports (for example, `8080-8081`).
-- 生产环境请只开放需要的端口（例如 `8080-8081`）。
-- On cloud VMs, allow matching inbound rules in security groups/firewalls.
-- 云服务器部署时，需在安全组或防火墙中放行对应入站端口。
+```cpp
+compositor
+    .Compose<Admin>(CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID, {8090, 1})
+    .AddRouter<CppServer::Routers::AdminRouter<Admin::Context>>();
+```
+
+二开建议：
+
+- 尽量把状态放在 runtime 自己的 `TContext` 中
+- 如需共享状态，自己负责加锁或使用原子
+- `ConfigureHttpServer(...)` 适合挂底层行为
+- `ConfigureService(...)` 适合做 service 级装配
+
+### 4. 项目主要类结构和模板行为
+
+启动链路：
+
+```text
+main.cpp
+  -> Server
+  -> Application::ConfigureApplication(...)
+  -> Compositor.Compose<TServiceTag>(...)
+  -> ComposedService<TContext>  // 蓝图
+  -> Server.Start()
+  -> ServiceRuntimeSet<TContext> // 运行集合
+```
+
+关键点：
+
+- `ComposedService<TContext>` 是蓝图，不直接监听端口
+- `ServiceRuntimeSet<TContext>` 是蓝图实例化后的运行集合，一个 service 可对应多个端口 runtime
+- `TServiceTag` 至少需要提供 `Context`、`ID`、`DisplayName`
+- `TContext` 是每个 runtime 的上下文，不同 service 可有不同结构
+- `ServiceKey = (ServiceTagId << 16) | ServiceInstanceId`
+
+建议阅读顺序：`main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`
+
+---
+
+## English
+
+### 1. Overview
+
+This is a lightweight C++ HTTP service skeleton built on `cpp-httplib`, `nlohmann/json`, and a custom thread-pool adapter. It ships with two default services:
+
+- `api`: `/`, `/status`, `/sample/*`, `/docs`
+- `file`: static file mount from `mount/`
+
+Core structure:
+
+- `Application::ConfigureApplication(...)`: application composition entry
+- `Server`: lifecycle shell
+- `Compositor`: service blueprint and runtime orchestration
+- `RoutingService<TContext>` / `RouterModule<TContext>`: routing abstraction
+
+Highlights:
+
+- clear separation between service blueprints and runtime instances
+- `ServiceTag + instanceId` identity model instead of string-only lookup
+- file service supports startup mount plus runtime change awareness
+- API routes can generate OpenAPI and Swagger UI automatically
+- request execution is backed by a thread pool
+
+### 2. Build, Deploy, Test
+
+Build locally:
+
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+Run locally:
+
+```powershell
+.\build\server.exe
+```
+
+Or:
+
+```powershell
+Set-Location build
+.\server.exe
+```
+
+Docker:
+
+```powershell
+docker build -t cpp-server .
+docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
+```
+
+Test:
+
+```powershell
+ctest --test-dir build --output-on-failure
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/status
+curl http://127.0.0.1:8080/docs
+curl http://127.0.0.1:8081/hello.txt
+```
+
+Port override example:
+
+```cpp
+CppServer::Core::ServerOptions options;
+options.service_port_overrides = {
+    {9000, 1},
+    {9001, 1},
+};
+
+CppServer::Core::Server server(options);
+CppServer::Application::ConfigureApplication(server, options);
+server.Start();
+```
+
+### 3. Extension Guide and Examples
+
+To add a new router to the existing `api` service:
+
+1. create a router derived from `RouterModule<TContext>`
+2. register it in `Application.cpp` with `.AddRouter<...>()`
+3. rebuild and check `/docs`
+
+Minimal example:
+
+```cpp
+template <typename TContext>
+class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  std::string RouterName() const override { return "TIME"; }
+  void Register(httplib::API::Router<TContext> &router) override {
+    router.Get("/time", [](const httplib::Request &) { return "ok"; });
+  }
+};
+```
+
+```cpp
+.AddRouter<CppServer::Routers::TimeRouter<ApiServiceContext>>()
+```
+
+To add a new service:
+
+1. define a new `Context`
+2. define a new `ServiceTag`
+3. implement a router
+4. compose it with `Compose<NewServiceTag>(...)`
+
+```cpp
+struct Admin {
+  using Context = CppServer::Services::Admin::Context;
+  static constexpr std::uint16_t ID = 10;
+  inline static constexpr std::string_view DisplayName = "admin";
+};
+```
+
+```cpp
+compositor
+    .Compose<Admin>(CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID, {8090, 1})
+    .AddRouter<CppServer::Routers::AdminRouter<Admin::Context>>();
+```
+
+Extension advice:
+
+- keep state runtime-local in `TContext` when possible
+- synchronize shared mutable state yourself
+- use `ConfigureHttpServer(...)` for low-level server behavior
+- use `ConfigureService(...)` for service-level composition
+
+### 4. Main Structure and Template Behavior
+
+Runtime flow:
+
+```text
+main.cpp
+  -> Server
+  -> Application::ConfigureApplication(...)
+  -> Compositor.Compose<TServiceTag>(...)
+  -> ComposedService<TContext>  // blueprint
+  -> Server.Start()
+  -> ServiceRuntimeSet<TContext> // runtime set
+```
+
+Key points:
+
+- `ComposedService<TContext>` is a blueprint, not a live listener
+- `ServiceRuntimeSet<TContext>` is the realized runtime set and may contain multiple port runtimes
+- `TServiceTag` should provide `Context`, `ID`, and `DisplayName`
+- `TContext` is per-runtime state
+- `ServiceKey = (ServiceTagId << 16) | ServiceInstanceId`
+
+Suggested reading order: `main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`
