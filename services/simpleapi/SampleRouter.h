@@ -1,27 +1,85 @@
 #pragma once
 
+#include <algorithm>
+#include <charconv>
+#include <optional>
+#include <random>
 #include <string>
+#include <system_error>
 
 #include "RouterModule.h"
 
 namespace CppServer::Routers {
 template <typename TContext>
-class SampleRouter final : public CppServer::Services::RouterModule<TContext> {
+class SampleRouter final : public CppServer::Routing::RouterModule<TContext> {
 public:
   std::string RouterName() const override { return "SAMPLE"; }
 
   void Register(httplib::API::Router<TContext> &router) override {
+    using Self = SampleRouter<TContext>;
+
     router.Get(
-        "/sample", "Sample ASCII Art",
+        "/sample/asciiart", "Sample ASCII Art",
         "Return ASCII text art for Markdown/Reddit/Manifold style rendering",
         "ASCII text",
         [](const httplib::Request &) {
           return asciiart;
         },
-        200, "text/plain; charset=utf-8");
+        httplib::API::RouteOptions{.content_type = "text/plain; charset=utf-8"});
+
+    router.Get(
+        "/sample/randomint", "Sample random integer",
+        "Return a Mersenne Twister integer in the inclusive [min, max] interval. Query params: min, max.",
+        "Random integer or null when query params are missing or invalid",
+        [](const httplib::Request &req) -> std::optional<int> {
+          const auto min_value = Self::ParseIntParam(req, "min");
+          const auto max_value = Self::ParseIntParam(req, "max");
+          if (!min_value.has_value() || !max_value.has_value()) {
+            return std::nullopt;
+          }
+
+          const auto [lower_bound, upper_bound] =
+              std::minmax(*min_value, *max_value);
+          return Self::GenerateRandomInt(lower_bound, upper_bound);
+        },
+        httplib::API::RouteOptions{.parameters =
+                                       {httplib::API::Parameter<int>(
+                                            httplib::API::ParameterLocation::Query,
+                                            "min",
+                                            "Inclusive lower bound for the random integer.",
+                                            true, httplib::API::Json(3)),
+                                        httplib::API::Parameter<int>(
+                                            httplib::API::ParameterLocation::Query,
+                                            "max",
+                                            "Inclusive upper bound for the random integer.",
+                                            true,
+                                            httplib::API::Json(7))}});
   }
 
 private:
+  static std::optional<int> ParseIntParam(const httplib::Request &req,
+                                          const char *name) {
+    if (!req.has_param(name)) {
+      return std::nullopt;
+    }
+
+    const std::string value = req.get_param_value(name);
+    int parsed_value = 0;
+    const auto [parse_end, parse_error] =
+        std::from_chars(value.data(), value.data() + value.size(), parsed_value);
+    if (parse_error != std::errc() || parse_end != value.data() + value.size()) {
+      return std::nullopt;
+    }
+
+    return parsed_value;
+  }
+
+  static int GenerateRandomInt(int min_value, int max_value) {
+    thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(min_value, max_value);
+    return distribution(generator);
+  }
+
   inline static constexpr const char asciiart[] = R"ASCII(
     [WWWWWWWEEEEEEEWWEENNNMMMMMNNNMg_   NNEMMMMMMMMMMMMMNNNNNNNNNNNNEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEWNM[%[EWW[[[[[[N
     [[[[[[[[[WWWWWWWWWWEEEEEWEENNNMNNMNMNNMMMMMMMMMMMMMMMNNNNNNNNNNNNNNNNNNNNNNNNEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEN@EEEEEEEEENEg_$[NW[[[[[[[E,

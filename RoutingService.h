@@ -13,12 +13,12 @@
 
 #include "RouterModule.h"
 
-namespace CppServer::Services {
-template <typename TContext> class Services {
+namespace CppServer::Routing {
+template <typename TContext> class RoutingService {
 public:
-  explicit Services(httplib::Server &server, TContext &context,
-                    std::shared_ptr<httplib::API::Registry> api_registry =
-                        std::make_shared<httplib::API::Registry>())
+  explicit RoutingService(httplib::Server &server, TContext &context,
+                          std::shared_ptr<httplib::API::Registry> api_registry =
+                              std::make_shared<httplib::API::Registry>())
       : server_(server), context_(context),
         api_registry_(std::move(api_registry)) {}
 
@@ -52,6 +52,34 @@ public:
     return static_cast<TRouter &>(*router_vector_.back());
   }
 
+  void RegisterSwaggerUI(
+      const std::string &title = "CppServer API",
+      const std::string &version = "1.0.0",
+      const std::string &description =
+          "Auto-generated routes and response metadata docs",
+      const std::string &docs_path = "/docs",
+      const std::string &openapi_path = "/docs/openapi.json",
+      const std::string &swagger_ui_endpoint = "",
+      const std::string &docs_html_path = "docs/swagger.html") {
+    httplib::API::Router<TContext> docs_router(server_, context_, api_registry_);
+    docs_router.RegisterSwaggerUI(title, version, description, docs_path,
+                                  openapi_path, swagger_ui_endpoint,
+                                  docs_html_path);
+  }
+
+  bool MountDirectory(const std::string &mount_path,
+                      const std::string &directory_path,
+                      const std::string &entry_file = "") {
+    httplib::API::Router<TContext> router(server_, context_, api_registry_);
+    return router.MountDirectory(mount_path, directory_path, entry_file);
+  }
+
+  bool MountFile(const std::string &mount_path,
+                 const std::string &file_path) {
+    httplib::API::Router<TContext> router(server_, context_, api_registry_);
+    return router.MountFile(mount_path, file_path);
+  }
+
   template <typename TRouter> TRouter *FindRouter() {
     const auto found = router_index_map_.find(std::type_index(typeid(TRouter)));
     if (found == router_index_map_.end()) {
@@ -61,10 +89,6 @@ public:
     return static_cast<TRouter *>(router_vector_[found->second].get());
   }
 
-  std::shared_ptr<httplib::API::Registry> ApiRegistry() const {
-    return api_registry_;
-  }
-
 private:
   httplib::Server &server_;
   TContext &context_;
@@ -72,4 +96,4 @@ private:
   std::vector<std::unique_ptr<RouterModule<TContext>>> router_vector_;
   std::unordered_map<std::type_index, std::size_t> router_index_map_;
 };
-} // namespace CppServer::Services
+} // namespace CppServer::Routing

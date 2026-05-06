@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -32,14 +31,14 @@
 
 namespace CppServer::Routers {
 template <typename TContext>
-class InfoRouter final : public CppServer::Services::RouterModule<TContext> {
+class StatusRouter final : public CppServer::Routing::RouterModule<TContext> {
 public:
-  std::string RouterName() const override { return "INFO"; }
+  std::string RouterName() const override { return "STATUS"; }
 
   std::optional<httplib::API::CachePolicy>
   ResolveCachePolicy(const std::string &method,
                      const std::string &path) const override {
-    if (method != "GET" || path != "/") {
+    if (method != "GET" || path != "/status") {
       return std::nullopt;
     }
 
@@ -55,12 +54,11 @@ public:
     using Json = nlohmann::json;
 
     router.Get(
-        "/", "Liveness Status",
-      "Get liveness, uptime, host CPU/memory usage and transport RTT",
+        "/status", "Liveness Status",
+        "Get liveness, uptime, host CPU/memory usage and transport RTT",
         "Runtime health",
         [&](const httplib::Request &req, TContext &ctx) {
           const auto handler_started = Clock::now();
-          ctx.request_count.fetch_add(1, std::memory_order_relaxed);
 
           const auto uptime_seconds =
               std::chrono::duration_cast<std::chrono::seconds>(Clock::now() -
@@ -103,11 +101,14 @@ public:
               {"rtt_ms", rtt_ms},
               {"rtt_source", std::move(rtt_source)},
           };
-        });
-
-    router.RegisterSwaggerUI("CppServer API", "1.0.0",
-                             "Auto-generated routes and response metadata docs",
-                             "/docs", "/docs/openapi.json");
+        },
+        httplib::API::RouteOptions{.parameters =
+                                       {httplib::API::Parameter<long long>(
+                                            httplib::API::ParameterLocation::Header,
+                                            "x-client-send-ms",
+                                            "Optional client send timestamp in Unix epoch milliseconds. When provided, RTT is computed as server_now - x-client-send-ms.",
+                                            false,
+                                            httplib::API::Json(1710000000000LL))}});
   }
 
 private:
@@ -371,4 +372,4 @@ private:
   }
 
 };
-} // namespace CppServer::Routers
+} // namespace CppServer::Routers::Status

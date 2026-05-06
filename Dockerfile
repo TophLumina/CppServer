@@ -31,8 +31,9 @@ WORKDIR /app
 COPY --from=build /app/runtime/server /app/server
 COPY --from=build /app/runtime/lib /app/lib
 COPY --from=build /app/docs /app/docs
+COPY --from=build /app/mount /app/mount
 
 ENV LD_LIBRARY_PATH=/app/lib
 
-EXPOSE 8080
+EXPOSE 8080 8081
 CMD ["/app/server"]
