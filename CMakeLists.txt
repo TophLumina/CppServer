@@ -69,6 +69,41 @@ if(BUILD_TESTING)
   add_executable(threadpool_smoke_test tests/threadpool_smoke.cpp)
   target_link_libraries(threadpool_smoke_test PRIVATE ThreadPool::ThreadPool)
 
+  add_executable(file_service_integration_test
+    tests/file_service_integration.cpp
+    Server.cpp
+  )
+  add_executable(api_service_integration_test
+    tests/api_service_integration.cpp
+    Application.cpp
+    Server.cpp
+  )
+  target_include_directories(file_service_integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/services
+  )
+  target_include_directories(api_service_integration_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/services
+  )
+  target_link_libraries(file_service_integration_test PRIVATE
+    httplib::API
+    httplib::httplib
+    ThreadPool::ThreadPool
+    nlohmann_json::nlohmann_json
+  )
+  target_link_libraries(api_service_integration_test PRIVATE
+    httplib::API
+    httplib::httplib
+    ThreadPool::ThreadPool
+    nlohmann_json::nlohmann_json
+  )
+
+  if(WIN32)
+    target_link_libraries(file_service_integration_test PRIVATE ws2_32)
+    target_link_libraries(api_service_integration_test PRIVATE ws2_32)
+  endif()
+
   # On Windows, copy the ThreadPool DLL to the output directory of the test executable so that it can find the DLL at runtime.
   if(WIN32)
     add_custom_command(TARGET threadpool_smoke_test POST_BUILD
@@ -76,7 +111,21 @@ if(BUILD_TESTING)
         $<TARGET_FILE:ThreadPool>
         $<TARGET_FILE_DIR:threadpool_smoke_test>
     )
+
+    add_custom_command(TARGET file_service_integration_test POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:ThreadPool>
+        $<TARGET_FILE_DIR:file_service_integration_test>
+    )
+
+    add_custom_command(TARGET api_service_integration_test POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:ThreadPool>
+        $<TARGET_FILE_DIR:api_service_integration_test>
+    )
   endif()
 
   add_test(NAME threadpool_smoke COMMAND threadpool_smoke_test)
+  add_test(NAME file_service_integration COMMAND file_service_integration_test)
+  add_test(NAME api_service_integration COMMAND api_service_integration_test)
 endif()

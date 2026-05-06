@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cwctype>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -7,17 +8,12 @@
 
 #include <httplib.h>
 
-#include "RuntimeAssets.h"
 #include "Context.h"
+#include "MappedFileCache.h"
+#include "MountPathWatcher.h"
 
 namespace CppServer::Services::Files {
 namespace Detail {
-struct MountSnapshot {
-  std::string resolved_mount_path;
-  std::filesystem::file_time_type latest_write_time{};
-  std::size_t entry_count = 0;
-};
-
 inline std::string DetectDirectoryEntryFile(
     const std::filesystem::path &directory_path) {
   namespace fs = std::filesystem;
@@ -31,47 +27,6 @@ inline std::string DetectDirectoryEntryFile(
   }
 
   return "";
-}
-
-inline std::optional<MountSnapshot>
-BuildMountSnapshot(const std::string &configured_mount_path) {
-  namespace fs = std::filesystem;
-
-  const auto resolved_mount_path =
-      CppServer::RuntimeAssets::FindExistingPath(
-          configured_mount_path, CppServer::RuntimeAssets::PathKind::Directory);
-  if (!resolved_mount_path.has_value()) {
-    return std::nullopt;
-  }
-
-  std::error_code error;
-  const fs::path mount_root(*resolved_mount_path);
-  MountSnapshot snapshot;
-  snapshot.resolved_mount_path = resolved_mount_path->string();
-  snapshot.entry_count = 1;
-  snapshot.latest_write_time = fs::last_write_time(mount_root, error);
-  if (error) {
-    snapshot.latest_write_time = std::filesystem::file_time_type::min();
-    error.clear();
-  }
-
-  fs::recursive_directory_iterator entry_it(
-      mount_root, fs::directory_options::skip_permission_denied, error);
-  const fs::recursive_directory_iterator end_it;
-  while (!error && entry_it != end_it) {
-    ++snapshot.entry_count;
-
-    std::error_code entry_error;
-    const auto entry_write_time =
-        fs::last_write_time(entry_it->path(), entry_error);
-    if (!entry_error && entry_write_time > snapshot.latest_write_time) {
-      snapshot.latest_write_time = entry_write_time;
-    }
-
-    entry_it.increment(error);
-  }
-
-  return snapshot;
 }
 
 inline std::optional<std::filesystem::path>
@@ -94,15 +49,59 @@ ResolveMountedRequestPath(const std::string &resolved_mount_path,
     }
   }
 
-  return (fs::path(resolved_mount_path) / relative_path).lexically_normal();
+  const fs::path mount_root = fs::path(resolved_mount_path).lexically_normal();
+  const fs::path target_path = (mount_root / relative_path).lexically_normal();
+
+  std::error_code error;
+  const fs::path canonical_mount_root = fs::weakly_canonical(mount_root, error);
+  if (error) {
+    return std::nullopt;
+  }
+
+  error.clear();
+  const fs::path canonical_target_path = fs::weakly_canonical(target_path, error);
+  if (error) {
+    return std::nullopt;
+  }
+
+  const auto path_component_equals = [](const fs::path &left,
+                                        const fs::path &right) {
+#ifdef _WIN32
+    std::wstring left_value = left.native();
+    std::wstring right_value = right.native();
+    if (left_value.size() != right_value.size()) {
+      return false;
+    }
+
+    for (std::size_t index = 0; index < left_value.size(); ++index) {
+      if (std::towlower(left_value[index]) != std::towlower(right_value[index])) {
+        return false;
+      }
+    }
+    return true;
+#else
+    return left == right;
+#endif
+  };
+
+  auto mount_it = canonical_mount_root.begin();
+  auto target_it = canonical_target_path.begin();
+  for (; mount_it != canonical_mount_root.end(); ++mount_it, ++target_it) {
+    if (target_it == canonical_target_path.end() ||
+        !path_component_equals(*mount_it, *target_it)) {
+      return std::nullopt;
+    }
+  }
+
+  return canonical_target_path;
 }
 
 inline bool ServeStaticFile(const std::filesystem::path &file_path,
+                            MappedFileCache &mapped_file_cache,
                             const httplib::Request &req,
                             httplib::Response &res) {
-  auto mapped_file =
-      std::make_shared<httplib::detail::mmap>(file_path.string().c_str());
-  if (!mapped_file->is_open()) {
+  auto mapped_file = mapped_file_cache.GetOrOpen(file_path);
+  if (mapped_file == nullptr || !mapped_file->is_open()) {
     res.status = 404;
     return true;
   }
@@ -127,6 +126,7 @@ inline bool ServeStaticFile(const std::filesystem::path &file_path,
 
 inline bool TryServeMountedRequest(const httplib::Request &req,
                                    httplib::Response &res,
+                                   MappedFileCache &mapped_file_cache,
                                    const std::string &resolved_mount_path) {
   namespace fs = std::filesystem;
 
@@ -148,66 +148,61 @@ inline bool TryServeMountedRequest(const httplib::Request &req,
       return false;
     }
 
-    return ServeStaticFile(*target_path / index_entry, req, res);
+    return ServeStaticFile(*target_path / index_entry, mapped_file_cache, req,
+                           res);
   }
 
   error.clear();
   if (fs::is_regular_file(*target_path, error) && !error) {
-    return ServeStaticFile(*target_path, req, res);
+    return ServeStaticFile(*target_path, mapped_file_cache, req, res);
   }
 
   return false;
 }
-} // namespace Detail
 
-inline void RefreshStateIfChanged(Context &file_context) {
-  const auto snapshot = Detail::BuildMountSnapshot(file_context.mount_path);
-
-  std::lock_guard<std::mutex> lock(file_context.mount_state_mutex);
-  if (!snapshot.has_value()) {
-    file_context.mount_state_initialized = false;
-    file_context.resolved_mount_path.clear();
-    file_context.entry_count = 0;
-    file_context.latest_write_time = std::filesystem::file_time_type{};
-    return;
+inline std::shared_ptr<MountPathWatcher> EnsureMountWatcher(Context &file_context) {
+  if (file_context.mount_watcher != nullptr) {
+    return file_context.mount_watcher;
   }
 
-  const bool state_changed =
-      !file_context.mount_state_initialized ||
-      file_context.resolved_mount_path != snapshot->resolved_mount_path ||
-      file_context.entry_count != snapshot->entry_count ||
-      file_context.latest_write_time != snapshot->latest_write_time;
-  if (!state_changed) {
-    return;
-  }
-
-  file_context.mount_state_initialized = true;
-  file_context.resolved_mount_path = snapshot->resolved_mount_path;
-  file_context.entry_count = snapshot->entry_count;
-  file_context.latest_write_time = snapshot->latest_write_time;
+  file_context.mount_watcher =
+      std::make_shared<MountPathWatcher>(file_context.mount_path);
+  return file_context.mount_watcher;
 }
 
+inline std::shared_ptr<MappedFileCache> EnsureMappedFileCache(
+    Context &file_context) {
+  if (file_context.mapped_file_cache != nullptr) {
+    return file_context.mapped_file_cache;
+  }
+
+  file_context.mapped_file_cache = std::make_shared<MappedFileCache>();
+  return file_context.mapped_file_cache;
+}
+} // namespace Detail
+
 inline void ConfigureRuntime(httplib::Server &server, Context &file_context) {
+  auto mount_watcher = Detail::EnsureMountWatcher(file_context);
+  auto mapped_file_cache = Detail::EnsureMappedFileCache(file_context);
+
   server.set_pre_routing_handler(
-      [&file_context](const httplib::Request &req,
-                      httplib::Response &res) -> httplib::Server::HandlerResponse {
+      [mount_watcher = std::move(mount_watcher),
+       mapped_file_cache = std::move(mapped_file_cache)](
+          const httplib::Request &req,
+          httplib::Response &res) -> httplib::Server::HandlerResponse {
         if (req.method != "GET" && req.method != "HEAD") {
           return httplib::Server::HandlerResponse::Unhandled;
         }
 
-        RefreshStateIfChanged(file_context);
-
-        std::string resolved_mount_path;
-        {
-          std::lock_guard<std::mutex> lock(file_context.mount_state_mutex);
-          resolved_mount_path = file_context.resolved_mount_path;
-        }
+        const std::string resolved_mount_path =
+            mount_watcher->ResolvedMountPath();
 
         if (resolved_mount_path.empty()) {
           return httplib::Server::HandlerResponse::Unhandled;
         }
 
-        if (Detail::TryServeMountedRequest(req, res, resolved_mount_path)) {
+        if (Detail::TryServeMountedRequest(req, res, *mapped_file_cache,
+                                          resolved_mount_path)) {
           return httplib::Server::HandlerResponse::Handled;
         }
         return httplib::Server::HandlerResponse::Unhandled;

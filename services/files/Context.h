@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstddef>
-#include <filesystem>
-#include <mutex>
+#include <memory>
 #include <string>
 
 namespace CppServer::Services::Files {
+class MountPathWatcher;
+class MappedFileCache;
+
 struct Context {
 	static constexpr int DEFAULT_PORT_BEGIN = 8081;
 	static constexpr std::size_t DEFAULT_PORT_COUNT = 1;
@@ -17,10 +19,7 @@ struct Context {
 
 	int port;
 	std::string mount_path;
-	std::string resolved_mount_path;
-	std::filesystem::file_time_type latest_write_time{};
-	std::size_t entry_count = 0;
-	bool mount_state_initialized = false;
-	std::mutex mount_state_mutex;
+	std::shared_ptr<MountPathWatcher> mount_watcher;
+	std::shared_ptr<MappedFileCache> mapped_file_cache;
 };
 } // namespace CppServer::Services::Files

@@ -53,10 +53,21 @@ docker build -t cpp-server .
 docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 ```
 
+平台说明：
+
+- 已验证：Windows 本地、Linux Docker
+- 保留 macOS / Apple Silicon 对应分支，但当前没有 macOS CI 或 Apple 实机验证，现阶段属于“源码保留、未验证支持”
+
 测试：
+
+- `threadpool_smoke`：线程池基础可用性
+- `api_service_integration`：默认 `api` service 装配与基础链路，覆盖 `/`、`/status`、`/docs/openapi.json`、`/sample/randomint`
+- `file_service_integration`：文件 service 基础链路，覆盖延迟挂载生效、缓存刷新、符号链接逃逸拒绝
 
 ```powershell
 ctest --test-dir build --output-on-failure
+ctest --test-dir build -R api_service_integration --output-on-failure
+ctest --test-dir build -R file_service_integration --output-on-failure
 curl http://127.0.0.1:8080/
 curl http://127.0.0.1:8080/status
 curl http://127.0.0.1:8080/docs
@@ -365,10 +376,21 @@ docker build -t cpp-server .
 docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 ```
 
+Platform note:
+
+- Verified: local Windows, Linux via Docker
+- macOS / Apple Silicon branches are still kept in the codebase, but there is currently no macOS CI or Apple hardware validation, so treat this as retained but unverified support
+
 Test:
+
+- `threadpool_smoke`: basic thread-pool availability
+- `api_service_integration`: default `api` service wiring and basic request paths covering `/`, `/status`, `/docs/openapi.json`, and `/sample/randomint`
+- `file_service_integration`: file service basics covering late mount activation, cached file refresh, and symlink escape rejection
 
 ```powershell
 ctest --test-dir build --output-on-failure
+ctest --test-dir build -R api_service_integration --output-on-failure
+ctest --test-dir build -R file_service_integration --output-on-failure
 curl http://127.0.0.1:8080/
 curl http://127.0.0.1:8080/status
 curl http://127.0.0.1:8080/docs
