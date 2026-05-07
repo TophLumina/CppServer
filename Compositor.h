@@ -64,18 +64,51 @@ inline std::string ComposeServiceName(const ServiceInstanceId instance_id) {
 
 template <typename TPool> class SharedTaskQueue : public httplib::TaskQueue {
 public:
-  explicit SharedTaskQueue(TPool &pool)
-      : pool_(std::ref(pool)), shutting_down_(false) {}
+  SharedTaskQueue(TPool &pool,
+                  std::shared_ptr<TaskQueueBudget> task_queue_budget)
+      : pool_(std::ref(pool)), task_queue_budget_(std::move(task_queue_budget)),
+        shutting_down_(false) {}
 
   bool enqueue(std::function<void()> fn) override {
     if (shutting_down_.load(std::memory_order_acquire)) {
       return false;
     }
 
+    const bool reserved_budget_slot =
+        task_queue_budget_ != nullptr && task_queue_budget_->TryEnqueue();
+    if (task_queue_budget_ != nullptr && !reserved_budget_slot) {
+      return false;
+    }
+
     try {
-      pool_.get().Submit([task = std::move(fn)]() mutable { task(); });
+      pool_.get().Submit([task = std::move(fn),
+                          task_queue_budget = task_queue_budget_]() mutable {
+        if (task_queue_budget != nullptr) {
+          task_queue_budget->OnExecutionStarted();
+        }
+
+        try {
+          task();
+        } catch (...) {
+          if (task_queue_budget != nullptr) {
+            task_queue_budget->OnExecutionFinished();
+          }
+          throw;
+        }
+
+        if (task_queue_budget != nullptr) {
+          task_queue_budget->OnExecutionFinished();
+        }
+      });
+
+      if (task_queue_budget_ != nullptr) {
+        task_queue_budget_->OnSubmitAccepted();
+      }
       return true;
     } catch (...) {
+      if (reserved_budget_slot) {
+        task_queue_budget_->OnSubmitRejected();
+      }
       return false;
     }
   }
@@ -86,15 +119,20 @@ public:
 
 private:
   std::reference_wrapper<TPool> pool_;
+  std::shared_ptr<TaskQueueBudget> task_queue_budget_;
   std::atomic<bool> shutting_down_;
 };
 
 template <typename TPool>
-inline std::shared_ptr<httplib::Server> CreateHttpServer(TPool &pool) {
+inline std::shared_ptr<httplib::Server>
+CreateHttpServer(TPool &pool,
+                 std::shared_ptr<TaskQueueBudget> task_queue_budget) {
   auto server = std::make_shared<httplib::Server>();
-  server->new_task_queue = [&pool] {
+  server->new_task_queue = [&pool,
+                            task_queue_budget = std::move(task_queue_budget)] {
     auto task_queue =
-        std::make_unique<SharedTaskQueue<::ThreadPool::ThreadPool>>(pool);
+        std::make_unique<SharedTaskQueue<::ThreadPool::ThreadPool>>(
+            pool, task_queue_budget);
     return task_queue.release();
   };
   return server;
@@ -389,7 +427,8 @@ public:
       const int listening_port =
           port_range_.port_begin + static_cast<int>(port_offset);
 
-      auto http_server = Detail::CreateHttpServer(context.worker_pool);
+      auto http_server = Detail::CreateHttpServer(context.worker_pool,
+                                                  context.task_queue_budget);
       auto service_context = context_factory_(listening_port);
       if (service_context == nullptr) {
         throw std::logic_error(
