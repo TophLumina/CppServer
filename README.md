@@ -1,5 +1,10 @@
 # CppServer
 
+> 一个便于二次开发的 C++ HTTP 服务骨架，带类型化路由、静态文件服务与线程池执行模型。  
+> An extension-friendly C++ HTTP service skeleton with typed routing, static file serving, and thread-pool-backed execution.
+
+License: [MIT](LICENSE)
+
 ## 中文
 
 ### 1. 项目介绍
@@ -87,6 +92,25 @@ CppServer::Core::Server server(options);
 CppServer::Application::ConfigureApplication(server, options);
 server.Start();
 ```
+
+并发预算示例：
+
+```cpp
+CppServer::Core::ServerOptions options;
+options.worker_threads = 16;
+options.max_inflight_connection_tasks = 64;
+
+CppServer::Core::Server server(options);
+CppServer::Application::ConfigureApplication(server, options);
+server.Start();
+```
+
+说明：
+
+- `max_inflight_connection_tasks` 会传入 `TaskQueueBudget`，作为全局连接任务预算，被所有 service 共享
+- 这个值限制的是 inflight connection task 总数，也就是“排队中 + 运行中”的连接任务，不是 HTTP request 数量
+- 设为 `0` 表示不限制；当前默认值是 `4 * WORKER_THREADS`
+- 达到上限后，新连接任务会在 task queue 边界被拒绝，而不是继续无限排队
 
 ### 3. 二次开发指南和样例
 
@@ -410,6 +434,25 @@ CppServer::Core::Server server(options);
 CppServer::Application::ConfigureApplication(server, options);
 server.Start();
 ```
+
+Concurrency budget example:
+
+```cpp
+CppServer::Core::ServerOptions options;
+options.worker_threads = 16;
+options.max_inflight_connection_tasks = 64;
+
+CppServer::Core::Server server(options);
+CppServer::Application::ConfigureApplication(server, options);
+server.Start();
+```
+
+Notes:
+
+- `max_inflight_connection_tasks` is passed into `TaskQueueBudget` as a global connection-task budget shared by all services
+- the limit applies to total inflight connection tasks, meaning queued plus running connection tasks, not HTTP request count
+- setting it to `0` disables the limit; the current default is `4 * WORKER_THREADS`
+- once the limit is reached, new connection tasks are rejected at the task-queue boundary instead of being queued without bound
 
 ### 3. Extension Guide and Examples
 
