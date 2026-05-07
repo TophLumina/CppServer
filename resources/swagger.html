@@ -99,11 +99,14 @@
         observer.observe(root, { childList: true, subtree: true });
       }
 
-      var basePath = window.location.pathname.replace(/\/$/, "");
-      var openapiUrl = window.location.origin + basePath + "/openapi.json";
+      var docsUrl = new URL(window.location.href);
+      var openapiUrl = new URL("openapi.json", docsUrl);
+      docsUrl.searchParams.forEach(function (value, key) {
+        openapiUrl.searchParams.set(key, value);
+      });
 
       SwaggerUIBundle({
-        url: openapiUrl,
+        url: openapiUrl.toString(),
         dom_id: "#swagger-ui",
         deepLinking: true,
         presets: [SwaggerUIBundle.presets.apis],
