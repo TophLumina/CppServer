@@ -40,7 +40,7 @@ struct CachePolicy {
   std::chrono::milliseconds ttl = std::chrono::milliseconds(0);
   std::vector<std::string> query_fields;
   std::vector<std::string> header_fields;
-  std::size_t max_entries = 256;
+  std::size_t max_entries = 128;
   std::size_t max_payload_bytes = 1024 * 1024;
   bool cache_error_response = false;
 };
