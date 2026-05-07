@@ -250,6 +250,33 @@ bool TestOpenApiRoute(int port) {
   return true;
 }
 
+bool TestDocsUiRoute(int port) {
+  httplib::Client client("127.0.0.1", port);
+  ConfigureClient(client);
+
+  auto docs_result = client.Get("/docs");
+  if (!docs_result || docs_result->status != 302 ||
+      docs_result->get_header_value("Location") != "/docs/swagger.html") {
+    std::cerr << "expected GET /docs to redirect to /docs/swagger.html\n";
+    return false;
+  }
+
+  auto swagger_result = client.Get("/docs/swagger.html");
+  if (!swagger_result || swagger_result->status != 200) {
+    std::cerr << "expected GET /docs/swagger.html to return 200\n";
+    return false;
+  }
+
+  if (swagger_result->body.find(
+          "new URL(\"openapi.json\", docsUrl)") == std::string::npos) {
+    std::cerr << "expected Swagger UI page to resolve openapi.json relative "
+                 "to the current page URL\n";
+    return false;
+  }
+
+  return true;
+}
+
 bool TestSampleRandomIntRoute(int port) {
   httplib::Client client("127.0.0.1", port);
   ConfigureClient(client);
@@ -291,6 +318,9 @@ int main() {
       return 1;
     }
     if (!TestOpenApiRoute(server.Port())) {
+      return 1;
+    }
+    if (!TestDocsUiRoute(server.Port())) {
       return 1;
     }
     if (!TestSampleRandomIntRoute(server.Port())) {
