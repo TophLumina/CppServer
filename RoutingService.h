@@ -60,7 +60,8 @@ public:
                     const std::string &docs_path = "/docs",
                     const std::string &openapi_path = "/docs/openapi.json",
                     const std::string &swagger_ui_endpoint = "",
-                    const std::string &docs_html_path = "docs/swagger.html") {
+            const std::string &docs_html_path =
+                      "resources/swagger.html") {
     httplib::API::Router<TContext> docs_router(server_, context_,
                                                api_registry_);
     docs_router.RegisterSwaggerUI(title, version, description, docs_path,

@@ -155,9 +155,18 @@ bool WaitForStatus(int port, const std::string &path, int expected_status,
   });
 }
 
+bool BodyContains(const std::optional<std::string> &body,
+                  const std::string &expected_fragment) {
+  return body.has_value() &&
+         body->find(expected_fragment) != std::string::npos;
+}
+
 class ScopedFileServer {
 public:
-  ScopedFileServer(std::filesystem::path mount_path, int port)
+  ScopedFileServer(std::filesystem::path mount_path, int port,
+                   std::string directory_listing_template_path =
+                       CppServer::Services::Files::Context::
+                           DEFAULT_DIRECTORY_LISTING_TEMPLATE_PATH)
       : mount_path_(std::move(mount_path)), port_(port),
         server_(MakeOptions()) {
     using FileServiceTag = CppServer::Core::ServiceTags::File;
@@ -169,8 +178,13 @@ public:
         .Compose<FileServiceTag>(
             CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
             CppServer::Core::PortRange{port_, 1},
-            [mount_path = mount_path_.string()](int listening_port) {
-              return std::make_unique<FileContext>(listening_port, mount_path);
+            [mount_path = mount_path_.string(),
+         directory_listing_template_path =
+           std::move(directory_listing_template_path)](
+                int listening_port) {
+              return std::make_unique<FileContext>(
+                  listening_port, mount_path,
+            directory_listing_template_path);
             })
         .ConfigureHttpServer(
             [](httplib::Server &http_server, FileContext &file_context, int) {
@@ -299,6 +313,116 @@ bool TestCachedFileUpdatesAfterRewrite() {
   return ok;
 }
 
+bool TestDirectoryListingIsGenerated() {
+  const auto test_root = CreateTestRoot("directory_listing");
+  const auto mount_path = test_root / "mount";
+  const auto nested_path = mount_path / "nested";
+  const auto blog_path = mount_path / "blog";
+  std::filesystem::create_directories(nested_path);
+  std::filesystem::create_directories(blog_path);
+
+  if (!WriteTextFile(mount_path / "hello.txt", "root-file") ||
+      !WriteTextFile(nested_path / "child.txt", "nested-child") ||
+      !WriteTextFile(blog_path / "index.html",
+                     "directory-index-should-auto-render") ||
+      !WriteTextFile(blog_path / "post.html", "blog-post-body")) {
+    std::cerr << "failed to create directory listing fixtures\n";
+    std::filesystem::remove_all(test_root);
+    return false;
+  }
+
+  const int port = AllocateLoopbackPort();
+  bool ok = false;
+  {
+    ScopedFileServer server(mount_path, port);
+
+    const auto root_body = FetchBody(port, "/", 200);
+    if (!BodyContains(root_body, "Index of /") ||
+        !BodyContains(root_body, "href=\"/hello.txt\"") ||
+        !BodyContains(root_body, "href=\"/nested/\"") ||
+        !BodyContains(root_body, "href=\"/blog/\"")) {
+      std::cerr << "expected generated listing for root directory\n";
+      std::filesystem::remove_all(test_root);
+      return false;
+    }
+
+    if (!WaitForStatus(port, "/nested", 302, 2s)) {
+      std::cerr << "expected directory requests without trailing slash to redirect\n";
+      std::filesystem::remove_all(test_root);
+      return false;
+    }
+
+    const auto nested_body = FetchBody(port, "/nested/", 200);
+    if (!BodyContains(nested_body, "Index of /nested/") ||
+        !BodyContains(nested_body, "href=\"/\"") ||
+        !BodyContains(nested_body, "href=\"/nested/child.txt\"")) {
+      std::cerr << "expected generated listing for nested directory\n";
+      std::filesystem::remove_all(test_root);
+      return false;
+    }
+
+    if (!WaitForStatus(port, "/blog", 302, 2s)) {
+      std::cerr << "expected blog directory requests without trailing slash to redirect\n";
+      std::filesystem::remove_all(test_root);
+      return false;
+    }
+
+    const auto blog_body = FetchBody(port, "/blog/", 200);
+    if (!BodyContains(blog_body, "directory-index-should-auto-render") ||
+        BodyContains(blog_body, "Index of /blog/") ||
+        BodyContains(blog_body, "href=\"/blog/post.html\"")) {
+      std::cerr << "expected directory request to prefer blog/index.html\n";
+      std::filesystem::remove_all(test_root);
+      return false;
+    }
+
+    ok = WaitForBody(port, "/blog/index.html",
+                     "directory-index-should-auto-render", 5s);
+    if (!ok) {
+      std::cerr << "index.html should still be directly served as a file\n";
+    }
+  }
+
+  std::filesystem::remove_all(test_root);
+  return ok;
+}
+
+bool TestDirectoryListingCustomTemplatePath() {
+  const auto test_root = CreateTestRoot("directory_listing_custom_template");
+  const auto mount_path = test_root / "mount";
+  std::filesystem::create_directories(mount_path);
+
+  if (!WriteTextFile(mount_path / "hello.txt", "root-file")) {
+    std::cerr << "failed to create override listing fixture\n";
+    std::filesystem::remove_all(test_root);
+    return false;
+  }
+
+  const auto template_path = test_root / "listing-template.html";
+  if (!WriteTextFile(template_path,
+                     "<!doctype html><html><body><section id=\"listing-shell\">{{TITLE}}<div>{{ENTRIES}}</div></section></body></html>")) {
+    std::cerr << "failed to create override listing template\n";
+    std::filesystem::remove_all(test_root);
+    return false;
+  }
+
+  const int port = AllocateLoopbackPort();
+  bool ok = false;
+  {
+    ScopedFileServer server(mount_path, port, template_path.string());
+    const auto root_body = FetchBody(port, "/", 200);
+    ok = BodyContains(root_body, "listing-shell") &&
+         BodyContains(root_body, "Index of /") &&
+         BodyContains(root_body, "href=\"/hello.txt\"");
+    if (!ok) {
+      std::cerr << "expected override template to render directory listing\n";
+    }
+  }
+
+  std::filesystem::remove_all(test_root);
+  return ok;
+}
+
 bool TestSymlinkEscapeIsRejected() {
   const auto test_root = CreateTestRoot("symlink_escape");
   const auto mount_path = test_root / "mount";
@@ -365,6 +489,12 @@ int main() {
       return 1;
     }
     if (!TestCachedFileUpdatesAfterRewrite()) {
+      return 1;
+    }
+    if (!TestDirectoryListingIsGenerated()) {
+      return 1;
+    }
+    if (!TestDirectoryListingCustomTemplatePath()) {
       return 1;
     }
     if (!TestSymlinkEscapeIsRejected()) {

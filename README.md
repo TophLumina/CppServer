@@ -12,7 +12,7 @@ License: [MIT](LICENSE)
 这是一个基于 `cpp-httplib`、`nlohmann/json` 和自定义线程池适配的轻量级 C++ HTTP 服务骨架。当前默认提供两个 service：
 
 - `api`：`/`、`/status`、`/sample/*`、`/docs`
-- `file`：静态文件挂载，默认服务 `mount/`
+- `file`：静态文件挂载，默认服务 `mount/`；目录请求优先返回 `index.html`，缺失时回退到模板化目录列表
 
 核心结构：
 
@@ -26,6 +26,8 @@ License: [MIT](LICENSE)
 - service 蓝图和 runtime 实例分离，便于理解“如何装配”和“如何运行”
 - 使用 `ServiceTag + instanceId` 标识 service，避免字符串式误用
 - 文件 service 支持“启动时挂载 + 运行期变化感知”
+- 目录请求会先尝试目录内的 `index.html`，找不到时再使用 `resources/directory-index-template.html` 渲染目录列表
+- 文件 service 的目录列表模板路径可在 `services/files/Context.h` 中按 service 实例配置
 - API 路由可自动生成 OpenAPI 与 Swagger UI
 - 请求处理接入线程池，适合轻量并发服务
 
@@ -67,7 +69,7 @@ docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 
 - `threadpool_smoke`：线程池基础可用性
 - `api_service_integration`：默认 `api` service 装配与基础链路，覆盖 `/`、`/status`、`/docs/openapi.json`、`/sample/randomint`
-- `file_service_integration`：文件 service 基础链路，覆盖延迟挂载生效、缓存刷新、符号链接逃逸拒绝
+- `file_service_integration`：文件 service 基础链路，覆盖延迟挂载生效、缓存刷新、目录请求优先命中 `index.html`、缺失首页时回退目录列表、自定义目录列表模板路径，以及符号链接逃逸拒绝
 
 ```powershell
 ctest --test-dir build --output-on-failure
@@ -314,6 +316,31 @@ compositor
     });
 ```
 
+如果你要给 file service 显式指定挂载目录和目录列表模板路径，可以改成：
+
+```cpp
+compositor
+  .Compose<FileServiceTag>(
+    CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+    ResolveServicePortRange<FileServiceContext>(options, 1),
+    [](int listening_port) {
+      return std::make_unique<FileServiceContext>(
+        listening_port,
+        "mount",
+        "resources/directory-index-template.html");
+    })
+  .ConfigureHttpServer([](httplib::Server &http_server,
+              FileServiceContext &file_context, int) {
+    CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+  });
+```
+
+行为说明：
+
+- 请求目录路径时，server 会先尝试返回该目录下的 `index.html`
+- 如果目录里没有 `index.html`，才会用模板渲染当前目录列表
+- 默认目录列表模板位于 `resources/directory-index-template.html`
+
 二开建议：
 
 - 尽量把状态放在 runtime 自己的 `TContext` 中
@@ -354,7 +381,7 @@ main.cpp
 This is a lightweight C++ HTTP service skeleton built on `cpp-httplib`, `nlohmann/json`, and a custom thread-pool adapter. It ships with two default services:
 
 - `api`: `/`, `/status`, `/sample/*`, `/docs`
-- `file`: static file mount from `mount/`
+- `file`: static file mount from `mount/`; directory requests serve `index.html` first and fall back to a templated directory listing when absent
 
 Core structure:
 
@@ -368,6 +395,8 @@ Highlights:
 - clear separation between service blueprints and runtime instances
 - `ServiceTag + instanceId` identity model instead of string-only lookup
 - file service supports startup mount plus runtime change awareness
+- directory requests try the directory-local `index.html` first, then fall back to `resources/directory-index-template.html`
+- the file service directory-listing template path is configurable per service instance through `services/files/Context.h`
 - API routes can generate OpenAPI and Swagger UI automatically
 - request execution is backed by a thread pool
 
@@ -409,7 +438,7 @@ Test:
 
 - `threadpool_smoke`: basic thread-pool availability
 - `api_service_integration`: default `api` service wiring and basic request paths covering `/`, `/status`, `/docs/openapi.json`, and `/sample/randomint`
-- `file_service_integration`: file service basics covering late mount activation, cached file refresh, and symlink escape rejection
+- `file_service_integration`: file service basics covering late mount activation, cached file refresh, directory requests preferring `index.html`, directory-listing fallback when `index.html` is absent, custom directory-listing template paths, and symlink escape rejection
 
 ```powershell
 ctest --test-dir build --output-on-failure
@@ -655,6 +684,31 @@ compositor
       CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
     });
 ```
+
+If you want to explicitly set both the mount path and the directory-listing template path for the file service, use:
+
+```cpp
+compositor
+  .Compose<FileServiceTag>(
+    CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+    ResolveServicePortRange<FileServiceContext>(options, 1),
+    [](int listening_port) {
+      return std::make_unique<FileServiceContext>(
+        listening_port,
+        "mount",
+        "resources/directory-index-template.html");
+    })
+  .ConfigureHttpServer([](httplib::Server &http_server,
+              FileServiceContext &file_context, int) {
+    CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+  });
+```
+
+Behavior summary:
+
+- directory requests first try to serve the directory-local `index.html`
+- if `index.html` is absent, the server renders the current directory through the listing template instead
+- the default directory-listing template lives at `resources/directory-index-template.html`
 
 Extension advice:
 
