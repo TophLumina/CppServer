@@ -12,7 +12,7 @@ License: [MIT](LICENSE)
 这是一个基于 `cpp-httplib`、`nlohmann/json` 和自定义线程池适配的轻量级 C++ HTTP 服务骨架。当前默认提供两个 service：
 
 - `api`：`/`、`/status`、`/sample/*`、`/docs`
-- `file`：静态文件挂载，默认服务 `mount/`
+- `file`：静态文件挂载，默认服务 `mount/`；目录请求优先返回 `index.html`，缺失时回退到模板化目录列表
 
 核心结构：
 
@@ -26,6 +26,9 @@ License: [MIT](LICENSE)
 - service 蓝图和 runtime 实例分离，便于理解“如何装配”和“如何运行”
 - 使用 `ServiceTag + instanceId` 标识 service，避免字符串式误用
 - 文件 service 支持“启动时挂载 + 运行期变化感知”
+- 目录请求会先尝试目录内的 `index.html`，找不到时再使用 `resources/directory-index-template.html` 渲染目录列表
+- 文件 service 的目录列表模板路径可在 `services/files/Context.h` 中按 service 实例配置
+- API router 支持按 route 声明响应缓存策略，并可通过 router 构造参数做策略注入
 - API 路由可自动生成 OpenAPI 与 Swagger UI
 - 请求处理接入线程池，适合轻量并发服务
 
@@ -67,7 +70,7 @@ docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 
 - `threadpool_smoke`：线程池基础可用性
 - `api_service_integration`：默认 `api` service 装配与基础链路，覆盖 `/`、`/status`、`/docs/openapi.json`、`/sample/randomint`
-- `file_service_integration`：文件 service 基础链路，覆盖延迟挂载生效、缓存刷新、符号链接逃逸拒绝
+- `file_service_integration`：文件 service 基础链路，覆盖延迟挂载生效、缓存刷新、目录请求优先命中 `index.html`、缺失首页时回退目录列表、自定义目录列表模板路径，以及符号链接逃逸拒绝
 
 ```powershell
 ctest --test-dir build --output-on-failure
@@ -189,6 +192,82 @@ compositor
 - handler 可以只接收 `const httplib::Request &`，也可以像上例一样再接收 `TContext &ctx` 读取运行时上下文
 - 现有 `api` service 已在 `Application.cpp` 调用了 `.AddSwaggerUI()`，所以新 router 注册成功后会自动进入 `/docs`
 - 如果这个新接口要共享状态，优先把状态放到 `services/simpleapi/Context.h` 的 `Context` 里，而不是放全局变量
+
+#### 3.1.1 API 缓存策略注入
+
+注入点不在 `ServerOptions`，而在 router 本身：重写 `RouterModule<TContext>::ResolveCachePolicy(method, path)`，按 route 返回 `std::optional<httplib::API::CachePolicy>`。如果返回 `std::nullopt`，或 `ttl <= 0`，该 route 就不会启用缓存。
+
+当前项目里，`services/simpleapi/StatusRouter.h` 已经是一个最小示例：它只对 `GET /status` 返回缓存策略。
+
+如果你希望把缓存策略从 `Application.cpp` 注入进 router，可以让 router 构造函数接收 `httplib::API::CachePolicy`，再通过 `.AddRouter<TRouter>(args...)` 传进去。`Compositor` 会把这些参数原样转发给 router 构造函数。
+
+示意：
+
+```cpp
+template <typename TContext>
+class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  explicit TimeRouter(httplib::API::CachePolicy cache_policy = {})
+      : cache_policy_(std::move(cache_policy)) {}
+
+  std::string RouterName() const override { return "TIME"; }
+
+  std::optional<httplib::API::CachePolicy>
+  ResolveCachePolicy(const std::string &method,
+                     const std::string &path) const override {
+    if (method == "GET" && path == "/time" && cache_policy_.ttl.count() > 0) {
+      return cache_policy_;
+    }
+    return std::nullopt;
+  }
+
+  void Register(httplib::API::Router<TContext> &router) override {
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/time", "Server Time",
+        "Return the current service port to verify router wiring.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"ok", true}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
+  }
+
+private:
+  httplib::API::CachePolicy cache_policy_;
+};
+
+httplib::API::CachePolicy time_cache;
+time_cache.ttl = std::chrono::seconds(1);
+time_cache.query_fields = {"tz"};
+time_cache.max_entries = 64;
+
+compositor
+    .Compose<ApiServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<ApiServiceContext>(options, 0))
+    .AddRouter<CppServer::Routers::DefaultRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::StatusRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::SampleRouter<ApiServiceContext>>()
+    .AddRouter<TimeRouter<ApiServiceContext>>(time_cache)
+    .AddSwaggerUI();
+```
+
+常用字段：
+
+- `ttl`：缓存有效期；小于等于 `0` 表示关闭缓存
+- `query_fields`：哪些 query 参数参与缓存 key；适合按 `?tz=UTC`、`?lang=zh-CN` 区分结果
+- `header_fields`：哪些请求头参与缓存 key；适合按鉴权头、地区头、版本头区分结果
+- `max_entries`：该 route 的缓存条目上限
+- `max_payload_bytes`：允许进入缓存的响应体大小上限
+- `cache_error_response`：是否缓存错误响应；默认不缓存 `5xx`
+
+建议：
+
+- 优先把缓存策略看成 route 级声明，而不是全局 API 开关
+- 对依赖 query/header 的接口，务必把相关字段放进 key；否则不同请求可能命中同一个缓存结果
+- 对高频健康检查、只读配置接口、短周期聚合结果，这套机制最合适
 
 验证：
 
@@ -314,6 +393,31 @@ compositor
     });
 ```
 
+如果你要给 file service 显式指定挂载目录和目录列表模板路径，可以改成：
+
+```cpp
+compositor
+  .Compose<FileServiceTag>(
+    CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+    ResolveServicePortRange<FileServiceContext>(options, 1),
+    [](int listening_port) {
+      return std::make_unique<FileServiceContext>(
+        listening_port,
+        "mount",
+        "resources/directory-index-template.html");
+    })
+  .ConfigureHttpServer([](httplib::Server &http_server,
+              FileServiceContext &file_context, int) {
+    CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+  });
+```
+
+行为说明：
+
+- 请求目录路径时，server 会先尝试返回该目录下的 `index.html`
+- 如果目录里没有 `index.html`，才会用模板渲染当前目录列表
+- 默认目录列表模板位于 `resources/directory-index-template.html`
+
 二开建议：
 
 - 尽量把状态放在 runtime 自己的 `TContext` 中
@@ -354,7 +458,7 @@ main.cpp
 This is a lightweight C++ HTTP service skeleton built on `cpp-httplib`, `nlohmann/json`, and a custom thread-pool adapter. It ships with two default services:
 
 - `api`: `/`, `/status`, `/sample/*`, `/docs`
-- `file`: static file mount from `mount/`
+- `file`: static file mount from `mount/`; directory requests serve `index.html` first and fall back to a templated directory listing when absent
 
 Core structure:
 
@@ -368,6 +472,9 @@ Highlights:
 - clear separation between service blueprints and runtime instances
 - `ServiceTag + instanceId` identity model instead of string-only lookup
 - file service supports startup mount plus runtime change awareness
+- directory requests try the directory-local `index.html` first, then fall back to `resources/directory-index-template.html`
+- the file service directory-listing template path is configurable per service instance through `services/files/Context.h`
+- API routers can declare route-level response cache policies and inject them through router constructor arguments
 - API routes can generate OpenAPI and Swagger UI automatically
 - request execution is backed by a thread pool
 
@@ -409,7 +516,7 @@ Test:
 
 - `threadpool_smoke`: basic thread-pool availability
 - `api_service_integration`: default `api` service wiring and basic request paths covering `/`, `/status`, `/docs/openapi.json`, and `/sample/randomint`
-- `file_service_integration`: file service basics covering late mount activation, cached file refresh, and symlink escape rejection
+- `file_service_integration`: file service basics covering late mount activation, cached file refresh, directory requests preferring `index.html`, directory-listing fallback when `index.html` is absent, custom directory-listing template paths, and symlink escape rejection
 
 ```powershell
 ctest --test-dir build --output-on-failure
@@ -531,6 +638,82 @@ Notes:
 - handlers can accept only `const httplib::Request &`, or accept `TContext &ctx` as shown above when runtime state is needed
 - the existing `api` service already calls `.AddSwaggerUI()` in `Application.cpp`, so newly registered routers are included in `/docs`
 - if a new route needs shared runtime state, prefer extending `services/simpleapi/Context.h` over introducing global variables
+
+#### 3.1.1 API Cache Policy Injection
+
+The injection point is the router, not `ServerOptions`: override `RouterModule<TContext>::ResolveCachePolicy(method, path)` and return `std::optional<httplib::API::CachePolicy>` per route. Returning `std::nullopt`, or a policy with `ttl <= 0`, disables caching for that route.
+
+The current repository already includes a minimal example in `services/simpleapi/StatusRouter.h`: it only enables caching for `GET /status`.
+
+If you want to inject cache policy from `Application.cpp`, let the router constructor accept `httplib::API::CachePolicy`, then pass it through `.AddRouter<TRouter>(args...)`. The `Compositor` forwards those arguments to the router constructor unchanged.
+
+Example:
+
+```cpp
+template <typename TContext>
+class TimeRouter final : public CppServer::Routing::RouterModule<TContext> {
+public:
+  explicit TimeRouter(httplib::API::CachePolicy cache_policy = {})
+      : cache_policy_(std::move(cache_policy)) {}
+
+  std::string RouterName() const override { return "TIME"; }
+
+  std::optional<httplib::API::CachePolicy>
+  ResolveCachePolicy(const std::string &method,
+                     const std::string &path) const override {
+    if (method == "GET" && path == "/time" && cache_policy_.ttl.count() > 0) {
+      return cache_policy_;
+    }
+    return std::nullopt;
+  }
+
+  void Register(httplib::API::Router<TContext> &router) override {
+    using Json = nlohmann::json;
+
+    router.Get(
+        "/time", "Server Time",
+        "Return the current service port to verify router wiring.",
+        "Simple JSON response",
+        [](const httplib::Request &, TContext &ctx) {
+          return Json{{"ok", true}, {"port", ctx.port}};
+        },
+        httplib::API::RouteOptions{});
+  }
+
+private:
+  httplib::API::CachePolicy cache_policy_;
+};
+
+httplib::API::CachePolicy time_cache;
+time_cache.ttl = std::chrono::seconds(1);
+time_cache.query_fields = {"tz"};
+time_cache.max_entries = 64;
+
+compositor
+    .Compose<ApiServiceTag>(
+        CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+        ResolveServicePortRange<ApiServiceContext>(options, 0))
+    .AddRouter<CppServer::Routers::DefaultRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::StatusRouter<ApiServiceContext>>()
+    .AddRouter<CppServer::Routers::SampleRouter<ApiServiceContext>>()
+    .AddRouter<TimeRouter<ApiServiceContext>>(time_cache)
+    .AddSwaggerUI();
+```
+
+Key fields:
+
+- `ttl`: cache lifetime; values less than or equal to `0` disable caching
+- `query_fields`: query parameters that participate in the cache key
+- `header_fields`: request headers that participate in the cache key
+- `max_entries`: per-route cache entry limit
+- `max_payload_bytes`: maximum response body size eligible for caching
+- `cache_error_response`: whether to cache error responses; `5xx` is not cached by default
+
+Guidance:
+
+- treat this as a route-level declaration, not a global API cache switch
+- if a route varies by query or header, include those fields in the cache key
+- this mechanism is best suited for frequent health checks, read-only configuration endpoints, and short-lived aggregate responses
 
 Validation:
 
@@ -655,6 +838,31 @@ compositor
       CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
     });
 ```
+
+If you want to explicitly set both the mount path and the directory-listing template path for the file service, use:
+
+```cpp
+compositor
+  .Compose<FileServiceTag>(
+    CppServer::Core::DEFAULT_SERVICE_INSTANCE_ID,
+    ResolveServicePortRange<FileServiceContext>(options, 1),
+    [](int listening_port) {
+      return std::make_unique<FileServiceContext>(
+        listening_port,
+        "mount",
+        "resources/directory-index-template.html");
+    })
+  .ConfigureHttpServer([](httplib::Server &http_server,
+              FileServiceContext &file_context, int) {
+    CppServer::Services::Files::ConfigureRuntime(http_server, file_context);
+  });
+```
+
+Behavior summary:
+
+- directory requests first try to serve the directory-local `index.html`
+- if `index.html` is absent, the server renders the current directory through the listing template instead
+- the default directory-listing template lives at `resources/directory-index-template.html`
 
 Extension advice:
 

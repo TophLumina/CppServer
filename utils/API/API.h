@@ -40,7 +40,7 @@ struct CachePolicy {
   std::chrono::milliseconds ttl = std::chrono::milliseconds(0);
   std::vector<std::string> query_fields;
   std::vector<std::string> header_fields;
-  std::size_t max_entries = 256;
+  std::size_t max_entries = 128;
   std::size_t max_payload_bytes = 1024 * 1024;
   bool cache_error_response = false;
 };
@@ -794,7 +794,8 @@ public:
                     const std::string &docs_path = "/docs",
                     const std::string &openapi_path = "/docs/openapi.json",
                     const std::string &swagger_ui_endpoint = "",
-                    const std::string &docs_html_path = "docs/swagger.html") {
+            const std::string &docs_html_path =
+                      "resources/swagger.html") {
     registry_->Declare(RouteRecord{
         .method = "GET",
         .path = openapi_path,

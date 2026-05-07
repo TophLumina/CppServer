@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f6f1e8;
+      --panel: rgba(255, 255, 255, 0.78);
+      --edge: rgba(53, 47, 39, 0.11);
+      --text: #2f261f;
+      --muted: #756555;
+      --accent: #0064d6;
+      --folder: #995319;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #181818;
+        --panel: rgba(31, 31, 31, 0.86);
+        --edge: rgba(255, 255, 255, 0.08);
+        --text: #f2ebdf;
+        --muted: #c6b49e;
+        --accent: #7dc1ff;
+        --folder: #ffc285;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(245, 181, 74, 0.18), transparent 28%),
+        linear-gradient(180deg, rgba(255,255,255,0.3), transparent 24%),
+        var(--page);
+    }
+    main {
+      max-width: 980px;
+      margin: 40px auto;
+      padding: 24px;
+    }
+    .shell {
+      overflow: hidden;
+      border-radius: 20px;
+      border: 1px solid var(--edge);
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.14);
+    }
+    header {
+      padding: 28px;
+      border-bottom: 1px solid var(--edge);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      line-height: 1.15;
+    }
+    .path {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+      font-size: 14px;
+    }
+    nav span { color: var(--muted); }
+    nav a {
+      color: inherit;
+      text-decoration: none;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.45);
+      border: 1px solid var(--edge);
+    }
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 12px 20px 20px;
+    }
+    li {
+      border-bottom: 1px solid var(--edge);
+    }
+    li:last-child {
+      border-bottom: 0;
+    }
+    li.empty {
+      padding: 28px 8px;
+      color: var(--muted);
+      text-align: center;
+    }
+    a.entry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+      padding: 14px 8px;
+    }
+    a.entry:hover {
+      background: rgba(255,255,255,0.36);
+    }
+    .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .kind {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .entry-directory .kind {
+      color: var(--folder);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="shell">
+      <header>
+        <h1>{{TITLE}}</h1>
+        <p class="path">{{CURRENT_PATH}}</p>
+        <nav>{{BREADCRUMBS}}</nav>
+      </header>
+      <ul>
+        {{ENTRIES}}
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
