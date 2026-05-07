@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS build
+FROM ubuntu:26.04 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
@@ -21,7 +21,7 @@ RUN set -eux; \
     test -n "$(find /app/runtime/lib -maxdepth 1 -type f -name 'libThreadPool.so*' -print -quit)"; \
     LD_LIBRARY_PATH=/app/runtime/lib ldd /app/runtime/server | grep -q "libThreadPool"
 
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
