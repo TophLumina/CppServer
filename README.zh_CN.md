@@ -141,6 +141,7 @@ server.Start();
 ```cpp
 #pragma once
 
+#include <chrono>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -158,10 +159,18 @@ public:
 
     router.Get(
         "/time", "Server Time",
-        "Return the current service port to verify router wiring.",
+        "Return the current server time and echo the requested timezone.",
         "Simple JSON response",
-        [](const httplib::Request &, TContext &ctx) {
-          return Json{{"ok", true}, {"port", ctx.port}};
+        [](const httplib::Request &req) {
+          using Clock = std::chrono::system_clock;
+          const auto unix_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                        Clock::now().time_since_epoch())
+                                        .count();
+          const std::string tz =
+              req.has_param("tz") ? req.get_param_value("tz") : "local";
+          return Json{{"ok", true},
+                      {"tz", tz},
+                      {"unix_seconds", unix_seconds}};
         },
         httplib::API::RouteOptions{});
   }
@@ -225,10 +234,18 @@ public:
 
     router.Get(
         "/time", "Server Time",
-        "Return the current service port to verify router wiring.",
+        "Return the current server time and echo the requested timezone.",
         "Simple JSON response",
-        [](const httplib::Request &, TContext &ctx) {
-          return Json{{"ok", true}, {"port", ctx.port}};
+        [](const httplib::Request &req) {
+          using Clock = std::chrono::system_clock;
+          const auto unix_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+                                        Clock::now().time_since_epoch())
+                                        .count();
+          const std::string tz =
+              req.has_param("tz") ? req.get_param_value("tz") : "local";
+          return Json{{"ok", true},
+                      {"tz", tz},
+                      {"unix_seconds", unix_seconds}};
         },
         httplib::API::RouteOptions{});
   }
