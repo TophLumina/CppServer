@@ -1,26 +1,26 @@
 # CppServer
 
-> 一个便于二次开发的 C++ HTTP 服务骨架，带类型化路由、静态文件服务与线程池执行模型。
+> 一个面向二次开发的 C++ HTTP 服务骨架，提供类型化路由、静态文件服务与线程池执行模型。
 
-English README: [README.md](./README.md)
+英文文档：[README.md](./README.md)
 
 License: [MIT](LICENSE)
 
 ## 1. 项目介绍
 
-这是一个基于 `cpp-httplib`、`nlohmann/json` 和自定义线程池适配的轻量级 C++ HTTP 服务骨架。当前默认提供两个 service：
+CppServer 是一个基于 `cpp-httplib`、`nlohmann/json` 和自定义线程池适配的轻量级 C++ HTTP 服务骨架。当前默认提供两个 service：
 
 - `api`：`/`、`/status`、`/sample/*`、`/docs`
 - `file`：静态文件挂载，默认服务 `mount/`；目录请求优先返回 `index.html`，缺失时回退到模板化目录列表
 
-核心结构：
+主要组成：
 
 - `Application::ConfigureApplication(...)`：应用装配入口
 - `Server`：生命周期外壳
 - `Compositor`：service 蓝图与 runtime 编排
 - `RoutingService<TContext>` / `RouterModule<TContext>`：路由层抽象
 
-功能特点：
+主要能力：
 
 - service 蓝图和 runtime 实例分离，便于理解“如何装配”和“如何运行”
 - 使用 `ServiceTag + instanceId` 标识 service，避免字符串式误用
@@ -40,13 +40,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-本地运行：
+在仓库根目录运行：
 
 ```powershell
 .\build\server.exe
 ```
 
-或：
+在 `build` 目录运行：
 
 ```powershell
 Set-Location build
@@ -60,12 +60,12 @@ docker build -t cpp-server .
 docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 ```
 
-平台说明：
+支持情况：
 
 - 已验证：Windows 本地、Linux Docker
 - 保留 macOS / Apple Silicon 对应分支，但当前没有 macOS CI 或 Apple 实机验证，现阶段属于“源码保留、未验证支持”
 
-测试：
+内置测试目标：
 
 - `threadpool_smoke`：线程池基础可用性
 - `api_service_integration`：默认 `api` service 装配与基础链路，覆盖 `/`、`/status`、`/docs/openapi.json`、`/sample/randomint`
@@ -107,7 +107,7 @@ CppServer::Application::ConfigureApplication(server, options);
 server.Start();
 ```
 
-说明：
+连接任务预算行为：
 
 - `max_inflight_connection_tasks` 会传入 `TaskQueueBudget`，作为全局连接任务预算，被所有 service 共享
 - 这个值限制的是 inflight connection task 总数，也就是“排队中 + 运行中”的连接任务，不是 HTTP request 数量
@@ -116,7 +116,7 @@ server.Start();
 
 ## 3. 二次开发指南和样例
 
-建议先对照这些现有文件再开始改：
+建议从以下文件开始了解扩展入口：
 
 - `Application.cpp`：应用装配入口，新增 router / service 最终都要落到这里
 - `ServiceTags.h`：service 的 `Context`、`ID`、`DisplayName` 定义
@@ -127,7 +127,7 @@ server.Start();
 
 ### 3.1 在已有 `api` service 下新增一个路由
 
-目标：新增 `GET /time`，同时让它自动出现在 `http://127.0.0.1:8080/docs`。
+目的：新增 `GET /time`，并让它自动出现在 `http://127.0.0.1:8080/docs`。
 
 步骤：
 
@@ -136,7 +136,7 @@ server.Start();
 3. 修改 `Application.cpp`，先 `#include "services/simpleapi/TimeRouter.h"`，再在 `api` service 的装配链上追加 `.AddRouter<...>()`
 4. 重新构建并访问 `/time`、`/docs`
 
-新文件：`services/simpleapi/TimeRouter.h`
+新增 `services/simpleapi/TimeRouter.h`：
 
 ```cpp
 #pragma once
@@ -178,7 +178,7 @@ public:
 } // namespace CppServer::Routers
 ```
 
-修改文件：`Application.cpp`
+更新 `Application.cpp`：
 
 ```cpp
 #include "services/simpleapi/TimeRouter.h"
@@ -194,7 +194,7 @@ compositor
     .AddSwaggerUI();
 ```
 
-说明：
+实现要点：
 
 - `RouterModule<TContext>` 的最小接口只有 `RouterName()` 和 `Register(...)`，定义见 `RouterModule.h`
 - handler 可以只接收 `const httplib::Request &`，也可以像上例一样再接收 `TContext &ctx` 读取运行时上下文
@@ -209,7 +209,7 @@ compositor
 
 如果你希望把缓存策略从 `Application.cpp` 注入进 router，可以让 router 构造函数接收 `httplib::API::CachePolicy`，再通过 `.AddRouter<TRouter>(args...)` 传进去。`Compositor` 会把这些参数原样转发给 router 构造函数。
 
-示意：
+参考实现：
 
 ```cpp
 template <typename TContext>
@@ -270,7 +270,7 @@ compositor
     .AddSwaggerUI();
 ```
 
-常用字段：
+缓存策略字段：
 
 - `ttl`：缓存有效期；小于等于 `0` 表示关闭缓存
 - `query_fields`：哪些 query 参数参与缓存 key；适合按 `?tz=UTC`、`?lang=zh-CN` 区分结果
@@ -279,7 +279,7 @@ compositor
 - `max_payload_bytes`：允许进入缓存的响应体大小上限
 - `cache_error_response`：是否缓存错误响应；默认不缓存 `5xx`
 
-建议：
+使用原则：
 
 - 优先把缓存策略看成 route 级声明，而不是全局 API 开关
 - 对依赖 query/header 的接口，务必把相关字段放进 key；否则不同请求可能命中同一个缓存结果
@@ -294,7 +294,7 @@ curl http://127.0.0.1:8080/docs
 
 ### 3.2 新增一个新的 routing service
 
-目标：新增一个独立的 `admin` service，监听 `8090`，提供 `GET /admin/ping`。
+目的：新增一个独立的 `admin` service，监听 `8090`，提供 `GET /admin/ping`。
 
 步骤：
 
@@ -304,7 +304,7 @@ curl http://127.0.0.1:8080/docs
 4. 修改 `Application.cpp`，先包含新 router 头文件，再通过 `.Compose<AdminServiceTag>(...)` 把它装配进去
 5. 如果你使用 `ServerOptions::service_port_overrides`，记得给新 service 预留新的下标；按当前 `Application.cpp` 的装配顺序，`api -> file -> admin` 分别对应 `0 / 1 / 2`
 
-新文件：`services/admin/Context.h`
+新增 `services/admin/Context.h`：
 
 ```cpp
 #pragma once
@@ -324,7 +324,7 @@ struct Context {
 } // namespace CppServer::Services::Admin
 ```
 
-新文件：`services/admin/AdminRouter.h`
+新增 `services/admin/AdminRouter.h`：
 
 ```cpp
 #pragma once
@@ -356,7 +356,7 @@ public:
 } // namespace CppServer::Routers
 ```
 
-修改文件：`ServiceTags.h`
+更新 `ServiceTags.h`：
 
 ```cpp
 #include "services/admin/Context.h"
@@ -368,7 +368,7 @@ struct Admin {
 };
 ```
 
-修改文件：`Application.cpp`
+更新 `Application.cpp`：
 
 ```cpp
 #include "services/admin/AdminRouter.h"
@@ -396,7 +396,7 @@ curl http://127.0.0.1:8090/docs
 - 普通 JSON / 文本接口：优先走 `RouterModule<TContext>` + `.AddRouter<...>()`
 - 想直接挂静态目录、`pre_routing_handler`、底层 `httplib::Server` 行为：参考 `services/files/Runtime.h`，在 `Application.cpp` 里使用 `.ConfigureHttpServer(...)`
 
-最小示意：
+最小示例：
 
 ```cpp
 compositor
@@ -409,7 +409,7 @@ compositor
     });
 ```
 
-如果你要给 file service 显式指定挂载目录和目录列表模板路径，可以改成：
+如果你需要为 file service 显式指定挂载目录和目录列表模板路径，可以改为：
 
 ```cpp
 compositor
@@ -428,13 +428,13 @@ compositor
   });
 ```
 
-行为说明：
+目录服务行为：
 
 - 请求目录路径时，server 会先尝试返回该目录下的 `index.html`
 - 如果目录里没有 `index.html`，才会用模板渲染当前目录列表
 - 默认目录列表模板位于 `resources/directory-index-template.html`
 
-二开建议：
+扩展原则：
 
 - 尽量把状态放在 runtime 自己的 `TContext` 中
 - 如需共享状态，自己负责加锁或使用原子
@@ -463,4 +463,4 @@ main.cpp
 - `TContext` 是每个 runtime 的上下文，不同 service 可有不同结构
 - `ServiceKey = (ServiceTagId << 16) | ServiceInstanceId`
 
-建议阅读顺序：`main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`
+推荐阅读顺序：`main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`

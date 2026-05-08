@@ -1,26 +1,26 @@
 # CppServer
 
-> An extension-friendly C++ HTTP service skeleton with typed routing, static file serving, and thread-pool-backed execution.
+> A C++ HTTP service skeleton designed for extension, with typed routing, static file serving, and a thread-pool-backed execution model.
 
-中文文档: [README.zh_CN.md](./README.zh_CN.md)
+Chinese documentation: [README.zh_CN.md](./README.zh_CN.md)
 
 License: [MIT](LICENSE)
 
 ## 1. Overview
 
-This is a lightweight C++ HTTP service skeleton built on `cpp-httplib`, `nlohmann/json`, and a custom thread-pool adapter. It ships with two default services:
+CppServer is a lightweight C++ HTTP service skeleton built on `cpp-httplib`, `nlohmann/json`, and a custom thread-pool adapter. It ships with two default services:
 
 - `api`: `/`, `/status`, `/sample/*`, `/docs`
 - `file`: static file mount from `mount/`; directory requests serve `index.html` first and fall back to a templated directory listing when absent
 
-Core structure:
+Primary components:
 
-- `Application::ConfigureApplication(...)`: application composition entry
-- `Server`: lifecycle shell
+- `Application::ConfigureApplication(...)`: application composition entry point
+- `Server`: lifecycle facade
 - `Compositor`: service blueprint and runtime orchestration
 - `RoutingService<TContext>` / `RouterModule<TContext>`: routing abstraction
 
-Highlights:
+Key capabilities:
 
 - clear separation between service blueprints and runtime instances
 - `ServiceTag + instanceId` identity model instead of string-only lookup
@@ -29,7 +29,7 @@ Highlights:
 - the file service directory-listing template path is configurable per service instance through `services/files/Context.h`
 - API routers can declare route-level response cache policies and inject them through router constructor arguments
 - API routes can generate OpenAPI and Swagger UI automatically
-- request execution is backed by a thread pool
+- request execution is handled by a shared thread pool
 
 ## 2. Build, Deploy, Test
 
@@ -40,13 +40,13 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-Run locally:
+Run from the repository root:
 
 ```powershell
 .\build\server.exe
 ```
 
-Or:
+Run from the `build` directory:
 
 ```powershell
 Set-Location build
@@ -60,12 +60,12 @@ docker build -t cpp-server .
 docker run -d --rm --name cpp-server -p 8080:8080 -p 8081:8081 cpp-server
 ```
 
-Platform note:
+Supported environments:
 
 - Verified: local Windows, Linux via Docker
 - macOS / Apple Silicon branches are still kept in the codebase, but there is currently no macOS CI or Apple hardware validation, so treat this as retained but unverified support
 
-Test:
+Included test targets:
 
 - `threadpool_smoke`: basic thread-pool availability
 - `api_service_integration`: default `api` service wiring and basic request paths covering `/`, `/status`, `/docs/openapi.json`, and `/sample/randomint`
@@ -107,7 +107,7 @@ CppServer::Application::ConfigureApplication(server, options);
 server.Start();
 ```
 
-Notes:
+Connection task budget behavior:
 
 - `max_inflight_connection_tasks` is passed into `TaskQueueBudget` as a global connection-task budget shared by all services
 - the limit applies to total inflight connection tasks, meaning queued plus running connection tasks, not HTTP request count
@@ -116,7 +116,7 @@ Notes:
 
 ## 3. Extension Guide and Examples
 
-Start from these files before extending the project:
+The following files are the recommended starting points for extension work:
 
 - `Application.cpp`: composition entry where new routers and services are wired
 - `ServiceTags.h`: defines `Context`, `ID`, and `DisplayName` for each service
@@ -127,7 +127,7 @@ Start from these files before extending the project:
 
 #### 3.1 Add a router to the existing `api` service
 
-Goal: add `GET /time` and have it appear automatically in `http://127.0.0.1:8080/docs`.
+Objective: add `GET /time` and have it appear automatically in `http://127.0.0.1:8080/docs`.
 
 Steps:
 
@@ -136,7 +136,7 @@ Steps:
 3. update `Application.cpp`: add `#include "services/simpleapi/TimeRouter.h"` and append `.AddRouter<...>()` to the `api` composition chain
 4. rebuild and verify `/time` and `/docs`
 
-New file: `services/simpleapi/TimeRouter.h`
+Create `services/simpleapi/TimeRouter.h`:
 
 ```cpp
 #pragma once
@@ -178,7 +178,7 @@ public:
 } // namespace CppServer::Routers
 ```
 
-Updated file: `Application.cpp`
+Update `Application.cpp`:
 
 ```cpp
 #include "services/simpleapi/TimeRouter.h"
@@ -194,7 +194,7 @@ compositor
     .AddSwaggerUI();
 ```
 
-Notes:
+Implementation details:
 
 - `RouterModule<TContext>` only requires `RouterName()` and `Register(...)`; see `RouterModule.h`
 - handlers can accept only `const httplib::Request &`, or accept `TContext &ctx` as shown above when runtime state is needed
@@ -209,7 +209,7 @@ The current repository already includes a minimal example in `services/simpleapi
 
 If you want to inject cache policy from `Application.cpp`, let the router constructor accept `httplib::API::CachePolicy`, then pass it through `.AddRouter<TRouter>(args...)`. The `Compositor` forwards those arguments to the router constructor unchanged.
 
-Example:
+Reference implementation:
 
 ```cpp
 template <typename TContext>
@@ -270,7 +270,7 @@ compositor
     .AddSwaggerUI();
 ```
 
-Key fields:
+Cache policy fields:
 
 - `ttl`: cache lifetime; values less than or equal to `0` disable caching
 - `query_fields`: query parameters that participate in the cache key
@@ -279,7 +279,7 @@ Key fields:
 - `max_payload_bytes`: maximum response body size eligible for caching
 - `cache_error_response`: whether to cache error responses; `5xx` is not cached by default
 
-Guidance:
+Recommended usage:
 
 - treat this as a route-level declaration, not a global API cache switch
 - if a route varies by query or header, include those fields in the cache key
@@ -294,7 +294,7 @@ curl http://127.0.0.1:8080/docs
 
 #### 3.2 Add a new routing service
 
-Goal: add a dedicated `admin` service on port `8090` with `GET /admin/ping`.
+Objective: add a dedicated `admin` service on port `8090` with `GET /admin/ping`.
 
 Steps:
 
@@ -304,7 +304,7 @@ Steps:
 4. update `Application.cpp` to include the new router and compose the new service with `.Compose<AdminServiceTag>(...)`
 5. if you use `ServerOptions::service_port_overrides`, reserve a new index for the service; with the current composition order in `Application.cpp`, `api -> file -> admin` maps to `0 / 1 / 2`
 
-New file: `services/admin/Context.h`
+Create `services/admin/Context.h`:
 
 ```cpp
 #pragma once
@@ -324,7 +324,7 @@ struct Context {
 } // namespace CppServer::Services::Admin
 ```
 
-New file: `services/admin/AdminRouter.h`
+Create `services/admin/AdminRouter.h`:
 
 ```cpp
 #pragma once
@@ -356,7 +356,7 @@ public:
 } // namespace CppServer::Routers
 ```
 
-Updated file: `ServiceTags.h`
+Update `ServiceTags.h`:
 
 ```cpp
 #include "services/admin/Context.h"
@@ -368,7 +368,7 @@ struct Admin {
 };
 ```
 
-Updated file: `Application.cpp`
+Update `Application.cpp`:
 
 ```cpp
 #include "services/admin/AdminRouter.h"
@@ -396,7 +396,7 @@ curl http://127.0.0.1:8090/docs
 - Regular JSON or text endpoints: prefer `RouterModule<TContext>` plus `.AddRouter<...>()`
 - Static directory serving, `pre_routing_handler`, or other raw `httplib::Server` behavior: follow `services/files/Runtime.h` and wire it in `Application.cpp` with `.ConfigureHttpServer(...)`
 
-Minimal pattern:
+Minimal example:
 
 ```cpp
 compositor
@@ -409,7 +409,7 @@ compositor
     });
 ```
 
-If you want to explicitly set both the mount path and the directory-listing template path for the file service, use:
+To explicitly set both the mount path and the directory-listing template path for the file service, use:
 
 ```cpp
 compositor
@@ -428,13 +428,13 @@ compositor
   });
 ```
 
-Behavior summary:
+Directory serving behavior:
 
 - directory requests first try to serve the directory-local `index.html`
 - if `index.html` is absent, the server renders the current directory through the listing template instead
 - the default directory-listing template lives at `resources/directory-index-template.html`
 
-Extension advice:
+Extension principles:
 
 - keep state runtime-local in `TContext` when possible
 - synchronize shared mutable state yourself
@@ -463,4 +463,4 @@ Key points:
 - `TContext` is per-runtime state
 - `ServiceKey = (ServiceTagId << 16) | ServiceInstanceId`
 
-Suggested reading order: `main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`
+Recommended reading order: `main.cpp` -> `Application.cpp` -> `Server.*` -> `Compositor.h` -> `RoutingService.h` -> `services/*`
